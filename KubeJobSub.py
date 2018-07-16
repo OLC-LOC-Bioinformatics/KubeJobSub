@@ -3,7 +3,7 @@
 import subprocess
 import argparse
 import shutil
-# import yaml
+import yaml
 
 
 def parse_kubectl_describe_nodes():
@@ -18,7 +18,9 @@ def parse_kubectl_describe_nodes():
     node_memory_loads = dict()
     node_cpu_capacity = dict()
     node_memory_capacity = dict()
+    # This is bad way of doing things.
     # TODO: Add something to check that nodes are actually up.
+    # TODO: Rework this entire thing to user kubectl top nodes - Maybe?
 
     # Iterate through the output created and populate our data dictionaries.
     # This way of doing things is definitely potentially very brittle - hopefully kubectl keeps output
@@ -50,6 +52,19 @@ def parse_kubectl_describe_nodes():
                                                                                           memoryusage=node_memory_loads[node_name]))
 
 
+def get_node_names(node_dict):
+    node_names = list()
+    for item in node_dict['items']:
+        node_names.append(item['metadata']['name'])
+    return node_names
+
+
+def get_node_cpu_capacity(node_name, node_dict):
+    for item in node_dict['items']:
+        if item['metadata']['name'] == node_name:
+            return item['status']['capacity']['cpu']
+
+
 if __name__ == '__main__':
     # Argparse - should probably have subcommands here - main one for submitting jobs, others
     # for getting cluster info and whatnot.
@@ -77,19 +92,38 @@ if __name__ == '__main__':
                                 type=str,
                                 required=True,
                                 help='Docker image to create container from.')
+    job_sub_parser.add_argument('-k', '--keep',
+                                default=False,
+                                action='store_true',
+                                help='A YAML file will be created to submit your job. Deleted by default once'
+                                     ' job is submitted, but if this flag is active it will be kept.')
     info_parser = subparsers.add_parser('info', help='Tells you things about your kubernetes cluster.')
     args = parser.parse_args()
 
     if shutil.which('kubectl') is None:
         print('ERROR: kubectl not found. Please verify that kubernetes is installed.')
-        # quit()
+        quit(code=1)
     info_dict = {'apiVersion': 'batch/v1',
                  'kind': 'Job',
                  'metadata': {'name': 'asdf'}}
-    # print(yaml.dump(info_dict, default_flow_style=False))
+
+    # We need to know all about the cluster. Best way to do this seems to be to make kubectl output
+    # some stuff in YAML format, then parse it to figure things out.
+    # Calls to kubectl don't seem to be quick, so just do this once at the start of the program,
+    # and then pass the dictionary around as necessary
+    yaml_info = subprocess.check_output('kubectl get nodes -o=yaml', shell=True).decode('utf-8')
+    node_dict = yaml.load(yaml_info)
 
     if 'submit' == args.subparsers:
-        print('SUBMIT')
+        print('SUBMITTING KUBEJOB')
+        # Need to:
+        # 1) Validate that the parameters put in actually make sense (i.e. request doesn't require more CPU/mem
+        # than is available on nodes)
+        # 2) Create a YAML file using the supplied info and submit job.
+        # 3) Cleanup YAML file, unless specifed that it should be kept.
         # Submit a kubejob here.
     elif 'info' == args.subparsers:
-        parse_kubectl_describe_nodes()
+        # parse_kubectl_describe_nodes()
+        node_names = get_node_names(node_dict)
+        for node in node_names:
+            print(get_node_cpu_capacity(node, node_dict))
