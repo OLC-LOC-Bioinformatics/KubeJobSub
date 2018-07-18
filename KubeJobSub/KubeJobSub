@@ -4,6 +4,7 @@ import subprocess
 import argparse
 import shutil
 import yaml
+import sys
 import os
 
 
@@ -126,6 +127,18 @@ def check_for_job_name(job_name):
     return job_exists
 
 
+def check_python_version():
+    """
+    This script is python3 only - double check that a py3 interpreter is being called and give a nice(ish) error
+    if it isn't.
+    :return: True if python version if 3.x, False if python version is 2.x
+    """
+    if sys.version_info[0] < 3:
+        return False
+    else:
+        return True
+
+
 if __name__ == '__main__':
     # Argparse - should probably have subcommands here - main one for submitting jobs, others
     # for getting cluster info and whatnot.
@@ -176,6 +189,11 @@ if __name__ == '__main__':
     info_parser = subparsers.add_parser('info', help='Tells you about your kubernetes cluster - number of nodes,'
                                                      'and specs/usage for each node.')
     args = parser.parse_args()
+
+    # Check that we're actually using python 3.
+    if check_python_version() is False:
+        print('ERROR: It looks like you\'re using python2, but this script needs python3. Exiting...')
+        quit(code=1)
 
     if shutil.which('kubectl') is None:
         print('ERROR: kubectl not found. Please verify that kubernetes is installed.')
