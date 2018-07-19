@@ -97,6 +97,12 @@ def recursive_delete(file_service, directory_name):
     file_service.delete_directory(share_name=AZURE_SHARE_NAME, directory_name=directory_name)
 
 
+def download_callback(current, total):
+    percent_completed = float('%1.f' % (100.0 * float(current/total)))
+    size_in_mb = float('%.1f' % float(total/(1024*1024)))
+    print('Percent complete:{}%\tSize:{}MB'.format(percent_completed, size_in_mb), end='\r')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='StorageWrapper: Using azure file shares is kind of a pain.'
                                                  'This wraps a bunch of Azure CLI file share commands into a more '
@@ -130,6 +136,11 @@ if __name__ == '__main__':
                                   default=None,
                                   help='Directory to upload to on cloud. Defaults to root of share. File will have'
                                        ' same name it does locally.')
+    upload_subparser.add_argument('-n', '--no_progress_bar',
+                                  default=True,
+                                  action='store_false',
+                                  help='A progress bar on file uploads. Useful for larger files, enabled by '
+                                       'default. Setting flag will disable progress bar.')
     # DOWNLOAD TODO: Some sort of progress bar for larger files.
     download_subparser = subparsers.add_parser('download', help='Downloads files from cloud to your machine.')
     download_subparser.add_argument('cloud_download_file',
@@ -174,19 +185,39 @@ if __name__ == '__main__':
         else:
             ls_path = args.ls_path
             wildcard_expression = None
-        generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=ls_path)
-        print_ls(file_list_generator=generator, expression=wildcard_expression)
+        try:
+            generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=ls_path)
+            print_ls(file_list_generator=generator, expression=wildcard_expression)
+        except azure.common.AzureMissingResourceHttpError:
+            print('ERROR: {} does not exist on your Azure File share.'.format(ls_path))
     # MKDIR
     elif args.subparsers == 'mkdir':
         file_service.create_directory(share_name=AZURE_SHARE_NAME, directory_name=args.mkdir_path)
     # UPLOAD
     elif args.subparsers == 'upload':
+        # TODO: Make no_progress_bar actually work.
         for local_file in args.local_file:
+            # Azure does not want any trailing slash in the upload path, or it gives a nasty error, so
+            # we take care of that.
+            upload_path = args.upload_path
+            if upload_path is not None:
+                if upload_path.endswith('/'):
+                    upload_path = upload_path[:-1]
             file_name = os.path.split(local_file)[-1]
-            file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
-                                               local_file_path=local_file,
-                                               directory_name=args.upload_path,
-                                               file_name=file_name)
+            # Azure storage claims you get automatic progress notifications, but that
+            if args.no_progress_bar:
+                print('Uploading {}...'.format(file_name))
+                file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
+                                                   local_file_path=local_file,
+                                                   directory_name=upload_path,
+                                                   file_name=file_name,
+                                                   progress_callback=download_callback)
+            else:
+                file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
+                                                   local_file_path=local_file,
+                                                   directory_name=upload_path,
+                                                   file_name=file_name)
+
     # DOWNLOAD
     elif args.subparsers == 'download':
         file_name = os.path.split(args.cloud_download_file)[-1]
@@ -197,6 +228,7 @@ if __name__ == '__main__':
         files_to_download = find_files_matching_expression(file_list_generator=generator,
                                                            expression=file_name)
         for file_to_download in files_to_download:
+            print('Downloading {}...'.format(file_to_download))
             file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
                                           file_path=os.path.join(args.download_dir, file_to_download),
                                           file_name=file_to_download,
@@ -208,12 +240,17 @@ if __name__ == '__main__':
         if file_directory == '':
             file_directory = None
         if args.recursive_delete:
+            # Azure also apparently does not like trailing slashes for directory removal, so take care of that too.
+            rm_path = args.rm_path
+            if rm_path.endswith('/'):
+                rm_path = rm_path[:-1]
             recursive_delete(file_service=file_service,
-                             directory_name=args.rm_path)
-        generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=file_directory)
-        files_to_delete = find_files_matching_expression(file_list_generator=generator,
-                                                         expression=file_name)
-        for file_to_delete in files_to_delete:
-            file_service.delete_file(share_name=AZURE_SHARE_NAME,
-                                     directory_name=file_directory,
-                                     file_name=file_to_delete)
+                             directory_name=rm_path)
+        else:
+            generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=file_directory)
+            files_to_delete = find_files_matching_expression(file_list_generator=generator,
+                                                             expression=file_name)
+            for file_to_delete in files_to_delete:
+                file_service.delete_file(share_name=AZURE_SHARE_NAME,
+                                         directory_name=file_directory,
+                                         file_name=file_to_delete)
