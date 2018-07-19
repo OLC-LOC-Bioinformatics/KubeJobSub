@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+
+from settings import AZURE_STORAGE_ACCOUNT, AZURE_SHARE_NAME, AZURE_STORAGE_KEY
+from termcolor import colored
+from azure.storage.file import FileService
+import azure.storage
+import argparse
+import re
+import os
+
+
+def set_credentials():
+    """
+    Sets credentials for Azure File Storage. Credentials are saved to settings.py and loaded automatically every
+    time this script gets run. Quits once done so updated credentials get loaded.
+    """
+    storage_account = input('Enter Azure storage account: ')
+    share_name = input('Enter Azure share name: ')
+    storage_key = input('Enter Azure storage key: ')
+    with open('settings.py', 'w') as f:
+        f.write("AZURE_STORAGE_ACCOUNT = '{}'\n".format(storage_account))
+        f.write("AZURE_SHARE_NAME = '{}'\n".format(share_name))
+        f.write("AZURE_STORAGE_KEY = '{}'\n".format(storage_key))
+    print('Credentials set!')
+    quit()
+
+
+def check_credentials_set():
+    """
+    Checks all credentials necessary for interacting with azure file storage are set.
+    DOES NOT check if credentials are actually valid.
+    TODO: Add a check that credentials are, in fact, valid if all are present.
+    :return: False if any credential is unset, True if all credentials are set.
+    """
+    if AZURE_SHARE_NAME is None or AZURE_STORAGE_ACCOUNT is None or AZURE_STORAGE_KEY is None:
+        return False
+    else:
+        return True
+
+
+def print_ls(file_list_generator, expression=None):
+    """
+    Prints output of azure's file list command in an ls-ish fashion with some nice highlighting
+    provided by termcolor.
+    :param file_list_generator: Generator object created by list_directories_and_files
+    :param expression: Expression containing * to be matched to do selective ls-ing
+    """
+    # TODO: Maybe sort these somehow? Not sure how the azure api likes to sort by default
+    for item in file_list_generator:
+        filename = item.name
+        match_found = True
+        if expression is not None:
+            expression = expression.replace('*', '.*')
+            if re.match(expression, filename) is None:
+                match_found = False
+        if match_found:
+            if filename.endswith('.gz') or filename.endswith('.bz2') or filename.endswith('.zip'):
+                print(colored(filename, 'red', attrs=['bold']))
+            elif type(item) is azure.storage.file.models.Directory:
+                print(colored(filename, 'blue', attrs=['bold']))
+            else:
+                print(filename)
+
+
+def find_files_matching_expression(file_list_generator, expression):
+    """
+    Looks for files in a directory that match a regex provided with *
+    :param file_list_generator: Generator object created by list_directories_and_files
+    :param expression: Expression containing a * of things you want to match
+    :return: List of files that match the expression given
+    """
+    expression = expression.replace('*', '.*')
+    files_matching_expression = list()
+    for item in file_list_generator:
+        filename = item.name
+        if re.match(expression, filename) is not None and type(item) is azure.storage.file.models.File:
+            files_matching_expression.append(filename)
+    return files_matching_expression
+
+
+def recursive_delete(file_service, directory_name):
+    """
+    Recursively deletes a directory.
+    :param file_service: Instantiated file_service object.
+    :param directory_name: Full path to directory that you want to delete.
+    """
+    generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=directory_name)
+    for item in generator:
+        if type(item) is azure.storage.file.models.Directory:
+            recursive_delete(file_service=file_service,
+                             directory_name=os.path.join(directory_name, item.name))
+        else:
+            file_service.delete_file(share_name=AZURE_SHARE_NAME,
+                                     directory_name=directory_name,
+                                     file_name=item.name)
+    file_service.delete_directory(share_name=AZURE_SHARE_NAME, directory_name=directory_name)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='StorageWrapper: Using azure file shares is kind of a pain.'
+                                                 'This wraps a bunch of Azure CLI file share commands into a more '
+                                                 'linux-esque environment.')
+    subparsers = parser.add_subparsers(help='SubCommand Help', dest='subparsers')
+    set_credentials_subparser = subparsers.add_parser('set_credentials', help='Sets the azure file share and account'
+                                                                              ' key as environment variables.')
+    # LS TODO: Add further wildcard support. Would like to have support for all wildcards, anywhere in query.
+    ls_subparser = subparsers.add_parser('ls', help='Lists files in a directory. Wildcard (*) can be used,'
+                                                    ' but only in final part of expression. (you can ls foo/bar*.py, '
+                                                    'but not foo*/bar.py)')
+    ls_subparser.add_argument('ls_path',
+                              nargs='?',  # This allows the argument to be optional so things behave like actual ls.
+                              default='.',
+                              type=str,
+                              help='Name of the directory you want to list things for.')
+    # MKDIR TODO: allow for -p functionality to create nested dirs if necessary
+    mkdir_subparser = subparsers.add_parser('mkdir', help='Makes a directory.')
+    mkdir_subparser.add_argument('mkdir_path',
+                                 type=str,
+                                 help='Name of the directory you want to create. You cannot do nested dirs.')
+    # UPLOAD TODO: add option to create upload dir specified if not already present
+    upload_subparser = subparsers.add_parser('upload', help='Uploads a file to azure file storage. Can use'
+                                                            'wildcard to upload multiple files.')
+    upload_subparser.add_argument('local_file',
+                                  nargs='+',
+                                  type=str,
+                                  help='Local file you want to upload.')
+    upload_subparser.add_argument('-p', '--upload_path',
+                                  type=str,
+                                  default=None,
+                                  help='Directory to upload to on cloud. Defaults to root of share. File will have'
+                                       ' same name it does locally.')
+    # DOWNLOAD TODO: Some sort of progress bar for larger files.
+    download_subparser = subparsers.add_parser('download', help='Downloads one or more files from cloud to your machine.')
+    download_subparser.add_argument('cloud_download_file',
+                                    type=str,
+                                    help='Path to files on cloud you want to download.')
+    download_subparser.add_argument('download_dir',
+                                    type=str,
+                                    nargs='?',
+                                    default='.',
+                                    help='Directory to download files to. Defaults to your current working directory')
+    # RM
+    rm_subparser = subparsers.add_parser('rm', help='Deletes a file. Can be run recursively to delete entire'
+                                                    ' directories with the -r flag.')
+    rm_subparser.add_argument('rm_path',
+                              type=str,
+                              help='Full path on cloud to file you want deleted. Wildcards (*) works on final'
+                                   ' part of path (You can rm dir/*.txt, but not rm */asdf.txt')
+    rm_subparser.add_argument('-r', '--recursive_delete',
+                              default=False,
+                              action='store_true',
+                              help='Set to recursively delete. Use with caution!')
+    args = parser.parse_args()
+
+    credentials_set = check_credentials_set()
+
+    # Used if people want to change the credentials (different storage accounts, or whatever.
+    if 'set_credentials' == args.subparsers:
+        set_credentials()
+    # Any of the rest of the commands need credentials set, so force user to do them if they haven't been set previously
+    if credentials_set is False:
+        print('Credentials not set! Please set them before proceeding.')
+        set_credentials()
+
+    # Now go through our commands!
+    # Create our file service object first, it gets used by everything.
+    file_service = FileService(account_name=AZURE_STORAGE_ACCOUNT, account_key=AZURE_STORAGE_KEY)
+    # LS
+    if args.subparsers == 'ls':
+        if '*' in args.ls_path:
+            ls_path = os.path.split(args.ls_path)[0]
+            wildcard_expression = os.path.split(args.ls_path)[-1]
+        else:
+            ls_path = args.ls_path
+            wildcard_expression = None
+        generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=ls_path)
+        print_ls(file_list_generator=generator, expression=wildcard_expression)
+    # MKDIR
+    elif args.subparsers == 'mkdir':
+        file_service.create_directory(share_name=AZURE_SHARE_NAME, directory_name=args.mkdir_path)
+    # UPLOAD
+    elif args.subparsers == 'upload':
+        for local_file in args.local_file:
+            file_name = os.path.split(local_file)[-1]
+            file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
+                                               local_file_path=local_file,
+                                               directory_name=args.upload_path,
+                                               file_name=file_name)
+    # DOWNLOAD
+    elif args.subparsers == 'download':
+        file_name = os.path.split(args.cloud_download_file)[-1]
+        file_directory = os.path.split(args.cloud_download_file)[0]
+        if file_directory == '':
+            file_directory = None
+        generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=file_directory)
+        files_to_download = find_files_matching_expression(file_list_generator=generator,
+                                                           expression=file_name)
+        for file_to_download in files_to_download:
+            file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
+                                          file_path=os.path.join(args.download_dir, file_to_download),
+                                          file_name=file_to_download,
+                                          directory_name=file_directory)
+    # DELETE
+    elif args.subparsers == 'rm':
+        file_name = os.path.split(args.rm_path)[-1]
+        file_directory = os.path.split(args.rm_path)[0]
+        if file_directory == '':
+            file_directory = None
+        if args.recursive_delete:
+            recursive_delete(file_service=file_service,
+                             directory_name=args.rm_path)
+        generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=file_directory)
+        files_to_delete = find_files_matching_expression(file_list_generator=generator,
+                                                         expression=file_name)
+        for file_to_delete in files_to_delete:
+            file_service.delete_file(share_name=AZURE_SHARE_NAME,
+                                     directory_name=file_directory,
+                                     file_name=file_to_delete)

@@ -10,5 +10,5 @@ setup(
     author="Andrew Low",
     author_email="andrew.low@canada.ca",
     url="https://github.com/lowandrew/KubeJobSub",
-    install_requires=['pyyaml', 'azure', 'azure-cli', 'termcolor']
+    install_requires=['pyyaml', 'azure-file-storage', 'termcolor']
 )
