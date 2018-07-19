@@ -1,4 +1,9 @@
-# KubeJobSub
+# KubeJobSub/AzureStorage
+
+This repository contains a Python package for two purposes - submitting jobs to a kubernetes cluster, and manipulating
+azure file storage with a bash-like interface.
+
+## KubeJobSub
 
 Writing YAML files for submitting jobs to Kubernetes (or for anything else, for that matter) is the opposite of fun.
 
@@ -92,3 +97,72 @@ NodeName	CPU_Capacity	CPU_Usage	Memory_Capacity	Memory_Usage
 aks-nodepool1-25823294-2	4	(28%)	8145492Ki	(26%)
 aks-nodepool1-25823294-3	4	(41%)	8145492Ki	(49%)
 ```
+
+## AzureStorage
+
+I've found Azure File shares to be a bit of a pain to manipulate with Azure's tools, so this tool provides a more bash-esque
+interface for manipulating/uploading/downloading files. There are lots of things you can't do yet, and loads of bugs.
+
+### Installation
+
+Also part of the KubeJobSub package, so use pip to install.
+
+### Usage
+
+The following commands are currently available - each command has it's own help menu that can be accessed with `-h`
+
+```
+usage: AzureStorage [-h] {set_credentials,ls,mkdir,upload,download,rm} ...
+
+StorageWrapper: Using azure file shares is kind of a pain.This wraps a bunch
+of Azure CLI file share commands into a more linux-esque environment.
+
+positional arguments:
+  {set_credentials,ls,mkdir,upload,download,rm}
+                        SubCommand Help
+    set_credentials     Sets the azure file share and account key as
+                        environment variables.
+    ls                  Lists files in a directory. Wildcard (*) can be used,
+                        but only in final part of expression. (you can ls
+                        foo/bar*.py, but not foo*/bar.py)
+    mkdir               Makes a directory.
+    upload              Uploads a file to azure file storage. Can usewildcard
+                        to upload multiple files.
+    download            Downloads one or more files from cloud to your
+                        machine.
+    rm                  Deletes a file. Can be run recursively to delete
+                        entire directories with the -r flag.
+
+optional arguments:
+  -h, --help            show this help message and exit
+
+```
+
+### Examples
+
+Note that if your credentials haven't been set, you'll be asked to set them. They'll be remembered, and can be changed
+(in the event you want to use a different storage account or share) using the `set_credentials` subcommand.
+
+List files in root dir:
+
+`AzureStorage ls`
+
+List all python files in directory `scripts`:
+
+`AzureStorage ls scripts/*.py`
+
+Make a directory called `new-dir` in root directory:
+
+`AzureStorage mkdir new-dir`
+
+Upload all `.py` files in your current directory to `new-dir` in Azure File Storage:
+
+`AzureStorage upload *.py -p new-dir`
+
+Remove all the `.py` files in new-dir:
+
+`AzureStorage rm new-dir/*.py`
+
+Download a folder called `example` and all of its subfolders and files:
+
+`AzureStorage rm -r example`

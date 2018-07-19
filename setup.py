@@ -4,11 +4,11 @@ from setuptools import setup, find_packages
 
 setup(
     name="KubeJobSub",
-    version="0.1.1",
+    version="0.1.3",
     packages=find_packages(),
-    scripts=['KubeJobSub/KubeJobSub'],
+    scripts=['KubeJobSub/KubeJobSub', 'KubeJobSub/AzureStorage'],
     author="Andrew Low",
     author_email="andrew.low@canada.ca",
     url="https://github.com/lowandrew/KubeJobSub",
-    install_requires=['pyyaml', 'azure-file-storage', 'termcolor']
+    install_requires=['pyyaml', 'azure-storage-file', 'termcolor']
 )

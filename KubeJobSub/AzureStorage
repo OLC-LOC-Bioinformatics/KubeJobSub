@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
-from settings import AZURE_STORAGE_ACCOUNT, AZURE_SHARE_NAME, AZURE_STORAGE_KEY
-from termcolor import colored
+from KubeJobSub.settings import AZURE_STORAGE_ACCOUNT, AZURE_SHARE_NAME, AZURE_STORAGE_KEY
 from azure.storage.file import FileService
 import azure.storage
+import KubeJobSub.settings
+from termcolor import colored
 import argparse
 import re
 import os
@@ -17,7 +18,7 @@ def set_credentials():
     storage_account = input('Enter Azure storage account: ')
     share_name = input('Enter Azure share name: ')
     storage_key = input('Enter Azure storage key: ')
-    with open('settings.py', 'w') as f:
+    with open(KubeJobSub.settings.__file__, 'w') as f:
         f.write("AZURE_STORAGE_ACCOUNT = '{}'\n".format(storage_account))
         f.write("AZURE_SHARE_NAME = '{}'\n".format(share_name))
         f.write("AZURE_STORAGE_KEY = '{}'\n".format(storage_key))
@@ -130,7 +131,7 @@ if __name__ == '__main__':
                                   help='Directory to upload to on cloud. Defaults to root of share. File will have'
                                        ' same name it does locally.')
     # DOWNLOAD TODO: Some sort of progress bar for larger files.
-    download_subparser = subparsers.add_parser('download', help='Downloads one or more files from cloud to your machine.')
+    download_subparser = subparsers.add_parser('download', help='Downloads files from cloud to your machine.')
     download_subparser.add_argument('cloud_download_file',
                                     type=str,
                                     help='Path to files on cloud you want to download.')
@@ -200,7 +201,7 @@ if __name__ == '__main__':
                                           file_path=os.path.join(args.download_dir, file_to_download),
                                           file_name=file_to_download,
                                           directory_name=file_directory)
-    # DELETE
+    # DELETE/RM
     elif args.subparsers == 'rm':
         file_name = os.path.split(args.rm_path)[-1]
         file_directory = os.path.split(args.rm_path)[0]
