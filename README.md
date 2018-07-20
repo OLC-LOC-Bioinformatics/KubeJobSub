@@ -1,3 +1,5 @@
+[![PyPI version](https://badge.fury.io/py/KubeJobSub.svg)](https://badge.fury.io/py/KubeJobSub)
+
 # KubeJobSub/AzureStorage
 
 This repository contains a Python package for two purposes - submitting jobs to a kubernetes cluster, and manipulating
@@ -101,11 +103,14 @@ aks-nodepool1-25823294-3	4	(41%)	8145492Ki	(49%)
 ## AzureStorage
 
 I've found Azure File shares to be a bit of a pain to manipulate with Azure's tools, so this tool provides a more bash-esque
-interface for manipulating/uploading/downloading files. There are lots of things you can't do yet, and loads of bugs.
+interface for manipulating/uploading/downloading files. There are lots of things you can't do yet, and probably lots
+of bugs.
 
 ### Installation
 
-Also part of the KubeJobSub package, so use pip to install.
+Also part of the KubeJobSub package, so use pip to install:
+
+`pip install KubeJobSub`
 
 ### Usage
 
@@ -159,10 +164,22 @@ Upload all `.py` files in your current directory to `new-dir` in Azure File Stor
 
 `AzureStorage upload *.py -p new-dir`
 
+Upload a folder called `folder` and all of its subfolders to root in Azure:
+
+`AzureStorage upload -r folder`
+
 Remove all the `.py` files in new-dir:
 
 `AzureStorage rm new-dir/*.py`
 
-Download a folder called `example` and all of its subfolders and files:
+Remove a folder called `example` and all of its subfolders and files:
 
 `AzureStorage rm -r example`
+
+Download a file called `file.txt` from directory `dir` to your current working directory:
+
+`AzureStorage download dir/file.txt`
+
+Download folder `folder` and all of its subfolders from root of Azure to directory `foo` on your machine:
+
+`AzureStorage download -r folder foo`

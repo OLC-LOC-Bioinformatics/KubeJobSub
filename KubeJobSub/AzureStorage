@@ -6,6 +6,7 @@ import azure.storage
 import KubeJobSub.settings
 from termcolor import colored
 import argparse
+import glob
 import re
 import os
 
@@ -46,7 +47,6 @@ def print_ls(file_list_generator, expression=None):
     :param file_list_generator: Generator object created by list_directories_and_files
     :param expression: Expression containing * to be matched to do selective ls-ing
     """
-    # TODO: Maybe sort these somehow? Not sure how the azure api likes to sort by default
     for item in file_list_generator:
         filename = item.name
         match_found = True
@@ -97,10 +97,113 @@ def recursive_delete(file_service, directory_name):
     file_service.delete_directory(share_name=AZURE_SHARE_NAME, directory_name=directory_name)
 
 
+def recursive_upload(file_service, directory_to_upload, upload_path, no_progress_bar=True):
+    """
+    Uploads a file on your system recursively to Azure share.
+    :param file_service: Instatiated file_service object.
+    :param directory_to_upload: The directory you want to upload to Azure
+    :param upload_path: Path to upload to on Azure. For root of share, needs to be set to None
+    :param no_progress_bar: Set to True if you do NOT want to see progress bars/info, False if seeing progress
+    bar is what you want.
+    """
+    dir_name = os.path.split(directory_to_upload)[-1]
+    if upload_path is None:
+        dir_to_create = dir_name
+    else:
+        dir_to_create = os.path.join(upload_path, dir_name)
+    if no_progress_bar is False:
+        print('Creating directory {}...'.format(dir_to_create))
+    file_service.create_directory(share_name=AZURE_SHARE_NAME,
+                                  directory_name=dir_to_create)
+    things_to_upload = glob.glob(os.path.join(directory_to_upload, '*'))
+    for item in things_to_upload:
+        if upload_path is None:
+            directory_name = dir_name
+        else:
+            directory_name = os.path.join(upload_path, dir_name)
+        if os.path.isfile(item):
+            item_name = os.path.split(item)[-1]
+            if no_progress_bar:
+                file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
+                                                   local_file_path=item,
+                                                   directory_name=directory_name,
+                                                   file_name=item_name)
+            else:
+                print('Uploading {}...'.format(item_name))
+                file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
+                                                   local_file_path=item,
+                                                   directory_name=directory_name,
+                                                   file_name=item_name,
+                                                   progress_callback=download_callback)
+        else:
+            recursive_upload(file_service=file_service,
+                             directory_to_upload=item,
+                             upload_path=directory_name,
+                             no_progress_bar=no_progress_bar)
+
+
+def recursive_download(file_service, directory_to_download, download_path, no_progress_bar=True):
+    """
+    Downloads a folder recursively from Azure to your machine.
+    :param file_service: Instantiated file_service object
+    :param directory_to_download: Path of directory you want to download from Azure
+    :param download_path: Path to directory you want to download the folder to on your machine
+    :param no_progress_bar: Set to True if you do NOT want to see progress bars/info, False if seeing progress is
+    what you want.
+    """
+    local_dir_name = os.path.split(directory_to_download)[-1]
+    local_dir_fullpath = os.path.join(download_path, local_dir_name)
+    if not os.path.isdir(local_dir_fullpath):
+        os.makedirs(local_dir_fullpath)
+        if no_progress_bar is False:
+            print('Created directory {}...'.format(local_dir_fullpath))
+    else:
+        print(colored('WARNING: Local folder {} already exists'.format(local_dir_fullpath), 'red', attrs=['bold']))
+
+    generator = file_service.list_directories_and_files(share_name=AZURE_SHARE_NAME, directory_name=directory_to_download)
+    for item in generator:
+        if type(item) is azure.storage.file.models.Directory:
+            recursive_download(file_service=file_service,
+                               directory_to_download=os.path.join(directory_to_download, item.name),
+                               download_path=local_dir_fullpath,
+                               no_progress_bar=no_progress_bar)
+        else:
+            if no_progress_bar is False:
+                print('Downloading {}...'.format(item.name))
+                file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
+                                              directory_name=directory_to_download,
+                                              file_path=os.path.join(local_dir_fullpath, item.name),
+                                              file_name=item.name,
+                                              progress_callback=download_callback)
+            else:
+                file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
+                                              directory_name=directory_to_download,
+                                              file_path=os.path.join(local_dir_fullpath, item.name),
+                                              file_name=item.name)
+
+
 def download_callback(current, total):
+    """
+    Shows a progress bar for file uploads/downloads.
+    :param current: Current number of bytes downloaded
+    :param total: Total file size
+    """
+    if total == 0:  # Sometimes files have zero size - set total and current to one to show instant 100 percent completion
+        total = 1
+        current = 1
     percent_completed = float('%1.f' % (100.0 * float(current/total)))
-    size_in_mb = float('%.1f' % float(total/(1024*1024)))
-    print('Percent complete:{}%\tSize:{}MB'.format(percent_completed, size_in_mb), end='\r')
+    size_in_mb = float('%.1f' % float(total/(1024*1024)))  # TODO: Change the suffix depending on file size.
+    progress_string = '['
+    for i in range(0, 100, 2):
+        if percent_completed >= i:
+            progress_string += '#'
+        else:
+            progress_string += ' '
+    progress_string += ']'
+    if percent_completed == 100:
+        print('{} {}%\tSize:{}MB'.format(progress_string, percent_completed, size_in_mb))
+    else:
+        print('{} {}%\tSize:{}MB'.format(progress_string, percent_completed, size_in_mb), end='\r')
 
 
 if __name__ == '__main__':
@@ -119,29 +222,33 @@ if __name__ == '__main__':
                               default='.',
                               type=str,
                               help='Name of the directory you want to list things for.')
-    # MKDIR TODO: allow for -p functionality to create nested dirs if necessary
+    # MKDIR
     mkdir_subparser = subparsers.add_parser('mkdir', help='Makes a directory.')
     mkdir_subparser.add_argument('mkdir_path',
                                  type=str,
                                  help='Name of the directory you want to create. You cannot do nested dirs.')
-    # UPLOAD TODO: add option to create upload dir specified if not already present
+    # UPLOAD
     upload_subparser = subparsers.add_parser('upload', help='Uploads a file to azure file storage. Can use'
                                                             'wildcard to upload multiple files.')
     upload_subparser.add_argument('local_file',
                                   nargs='+',
                                   type=str,
                                   help='Local file you want to upload.')
+    upload_subparser.add_argument('-r', '--recursive',
+                                  default=False,
+                                  action='store_true',
+                                  help='Set this flag if you want to upload entire directories.')
     upload_subparser.add_argument('-p', '--upload_path',
                                   type=str,
                                   default=None,
                                   help='Directory to upload to on cloud. Defaults to root of share. File will have'
                                        ' same name it does locally.')
     upload_subparser.add_argument('-n', '--no_progress_bar',
-                                  default=True,
-                                  action='store_false',
+                                  default=False,
+                                  action='store_true',
                                   help='A progress bar on file uploads. Useful for larger files, enabled by '
                                        'default. Setting flag will disable progress bar.')
-    # DOWNLOAD TODO: Some sort of progress bar for larger files.
+    # DOWNLOAD
     download_subparser = subparsers.add_parser('download', help='Downloads files from cloud to your machine.')
     download_subparser.add_argument('cloud_download_file',
                                     type=str,
@@ -151,6 +258,15 @@ if __name__ == '__main__':
                                     nargs='?',
                                     default='.',
                                     help='Directory to download files to. Defaults to your current working directory')
+    download_subparser.add_argument('-r', '--recursive',
+                                    default=False,
+                                    action='store_true',
+                                    help='Set this flag if you want to upload entire directories.')
+    download_subparser.add_argument('-n', '--no_progress_bar',
+                                    default=False,
+                                    action='store_true',
+                                    help='A progress bar on file uploads. Useful for larger files, enabled by '
+                                         'default. Setting flag will disable progress bar.')
     # RM
     rm_subparser = subparsers.add_parser('rm', help='Deletes a file. Can be run recursively to delete entire'
                                                     ' directories with the -r flag.')
@@ -195,31 +311,48 @@ if __name__ == '__main__':
         file_service.create_directory(share_name=AZURE_SHARE_NAME, directory_name=args.mkdir_path)
     # UPLOAD
     elif args.subparsers == 'upload':
-        # TODO: Make no_progress_bar actually work.
+        # Azure does not want any trailing slash in the upload path, or it gives an error. Deal with that here
+        upload_path = args.upload_path
+        if upload_path is not None:
+            if upload_path.endswith('/'):
+                upload_path = upload_path[:-1]
+        if args.recursive:
+            local_dir = os.path.abspath(args.local_file[0])
+            recursive_upload(file_service=file_service,
+                             directory_to_upload=local_dir,
+                             upload_path=upload_path,
+                             no_progress_bar=args.no_progress_bar)
+            quit()
         for local_file in args.local_file:
-            # Azure does not want any trailing slash in the upload path, or it gives a nasty error, so
-            # we take care of that.
-            upload_path = args.upload_path
-            if upload_path is not None:
-                if upload_path.endswith('/'):
-                    upload_path = upload_path[:-1]
             file_name = os.path.split(local_file)[-1]
-            # Azure storage claims you get automatic progress notifications, but that
+            # Azure storage claims you get automatic progress notifications, apparently you need the progress_callback
+            # set.
             if args.no_progress_bar:
+                file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
+                                                   local_file_path=local_file,
+                                                   directory_name=upload_path,
+                                                   file_name=file_name)
+            else:
                 print('Uploading {}...'.format(file_name))
                 file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
                                                    local_file_path=local_file,
                                                    directory_name=upload_path,
                                                    file_name=file_name,
                                                    progress_callback=download_callback)
-            else:
-                file_service.create_file_from_path(share_name=AZURE_SHARE_NAME,
-                                                   local_file_path=local_file,
-                                                   directory_name=upload_path,
-                                                   file_name=file_name)
 
     # DOWNLOAD
     elif args.subparsers == 'download':
+        if args.recursive:
+            # Check for trailing slash and get rid of it.
+            cloud_download_dir = args.cloud_download_file
+            if cloud_download_dir.endswith('/'):
+                cloud_download_dir = cloud_download_dir[:-1]
+            recursive_download(file_service=file_service,
+                               directory_to_download=cloud_download_dir,
+                               download_path=args.download_dir,
+                               no_progress_bar=args.no_progress_bar)
+            quit()
+
         file_name = os.path.split(args.cloud_download_file)[-1]
         file_directory = os.path.split(args.cloud_download_file)[0]
         if file_directory == '':
@@ -228,11 +361,18 @@ if __name__ == '__main__':
         files_to_download = find_files_matching_expression(file_list_generator=generator,
                                                            expression=file_name)
         for file_to_download in files_to_download:
-            print('Downloading {}...'.format(file_to_download))
-            file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
-                                          file_path=os.path.join(args.download_dir, file_to_download),
-                                          file_name=file_to_download,
-                                          directory_name=file_directory)
+            if args.no_progress_bar:
+                file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
+                                              file_path=os.path.join(args.download_dir, file_to_download),
+                                              file_name=file_to_download,
+                                              directory_name=file_directory)
+            else:
+                print('Downloading {}...'.format(file_to_download))
+                file_service.get_file_to_path(share_name=AZURE_SHARE_NAME,
+                                              file_path=os.path.join(args.download_dir, file_to_download),
+                                              file_name=file_to_download,
+                                              directory_name=file_directory,
+                                              progress_callback=download_callback)
     # DELETE/RM
     elif args.subparsers == 'rm':
         file_name = os.path.split(args.rm_path)[-1]
