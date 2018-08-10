@@ -213,7 +213,9 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers(help='SubCommand Help', dest='subparsers')
     set_credentials_subparser = subparsers.add_parser('set_credentials', help='Sets the azure file share and account'
                                                                               ' key as environment variables.')
-    # LS TODO: Add further wildcard support. Would like to have support for all wildcards, anywhere in query.
+    # LS
+    # TODO: Add further wildcard support. Would like to have support for all wildcards, anywhere in query.
+    # Also TODO: add support for -l(ish) option. Would be good to at least be able to list size
     ls_subparser = subparsers.add_parser('ls', help='Lists files in a directory. Wildcard (*) can be used,'
                                                     ' but only in final part of expression. (you can ls foo/bar*.py, '
                                                     'but not foo*/bar.py)')
