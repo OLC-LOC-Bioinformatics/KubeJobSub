@@ -1,9 +1,9 @@
 [![PyPI version](https://badge.fury.io/py/KubeJobSub.svg)](https://badge.fury.io/py/KubeJobSub)
 
-# KubeJobSub/AzureStorage
+# KubeJobSub/AzureStorage/AzureBatch
 
-This repository contains a Python package for two purposes - submitting jobs to a kubernetes cluster, and manipulating
-azure file storage with a bash-like interface.
+This repository contains a Python package for three purposes - submitting jobs to a kubernetes cluster, manipulating
+azure file storage with a bash-like interface, and simplifying submission of jobs to Azure Batch Service.
 
 ## KubeJobSub
 
@@ -183,3 +183,57 @@ Download a file called `file.txt` from directory `dir` to your current working d
 Download folder `folder` and all of its subfolders from root of Azure to directory `foo` on your machine:
 
 `AzureStorage download -r folder foo`
+
+## Azure Batch
+
+Submitting things to Azure Batch is an awful lot of work - this script makes your job much easier.
+
+You'll need three things:
+
+- an azure batch account
+- an azure storage account
+- an custom VM image in Azure that has any programs/databases you need to run your command pre-installed
+ see (https://docs.microsoft.com/en-us/azure/batch/batch-custom-images) for details on how to create one.
+
+If you have these, all you need to do is provide a configuration file, which needs the following information:
+
+- `BATCH_ACCOUNT_NAME`: The name of your batch account.
+- `BATCH_ACCOUNT_KEY`: The key for your batch account
+- `BATCH_ACCOUNT_URL`: The URL for your batch account
+- `STORAGE_ACCOUNT_NAME`: Name of your Azure Storage account
+- `STORAGE_ACCOUNT_KEY`: Access key for your Azure Storage account
+- `JOB_NAME`: A name to give your job - this must be unique among currently running jobs within your Azure Batch account.
+- `INPUT`: Files that you want to have as input for your job. This is done in a unix `mv` fashion. If, for example, you
+wanted to put all `.fastq.gz` files in your current directory into a folder called `raw_data` for your batch job,
+you would put `*.fastq.gz raw_data`. Upload of entire directories does not work at this time, but wildcards are fully
+supported. You may have any number of `INPUT` lines in your configuration file.
+- `OUTPUT`: Output files from your job you want. Again, directories aren't entirely supported at this time, but
+wildcards are. If you wanted to get all `.fasta` files out of a directory called `processed_sequence_data` on the cloud
+machine, you would put `processed_sequence_data/*.fasta` here. This will create a folder called `processed_sequence_data`
+in your current working directory and download all the FASTA files in the could machine to it. You may specify any
+number of `OUTPUT` lines in your configuration file.
+- `VM_IMAGE`: The URL for a custom VM image that you've created with any necessary programs and databases to run
+your commands pre-installed. This image must be in the same subscription as your Azure Batch Account
+- `COMMAND`: The command you want to use to run your analysis.
+
+If any of these parameters are missing, you will see an error message and the program will not proceed.
+
+Optionally, you may also set the size of the VM you want with the `VM_SIZE` parameter. This defaults to a 16 core, 64 GB RAM
+machine that should be suitable for most tasks, but this can be scaled up/down to your liking. (See https://docs.microsoft.com/en-us/azure/virtual-machines/linux/sizes-general for
+a list of VM sizes).
+
+Each parameter must have a := after the parameter, followed by the value for that parameter with no spaces.
+An example is below.
+
+```
+BATCH_ACCOUNT_NAME:=mybatchaccount
+BATCH_ACCOUNT_KEY:=keyforbatchaccount123jh4g123jh412h34ndafdas==
+BATCH_ACCOUNT_URL:=https://mybatchaccount.region.batch.azure.com
+STORAGE_ACCOUNT_NAME:=mystorageaccount
+STORAGE_ACCOUNT_KEY:=keyforstorageaccount122837462387423akljsdhfaksdfa==
+JOB_NAME:=myjob
+INPUT:=*.fastq.gz input_sequences
+OUTPUT:=processed_sequences/*
+VM_IMAGE:=/subscriptions/....
+COMMAND:=do_things.py --input input --output processed_sequences
+```

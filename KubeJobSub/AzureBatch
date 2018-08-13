@@ -136,6 +136,9 @@ class AzureBatch:
         return resource_files
 
     def create_pool(self):
+        """
+        Creates a pool of Ubuntu16.04 machines.
+        """
         batch_client = self._login_to_batch()
         new_pool = batch.models.PoolAddParameter(
             id=self.job_name,
@@ -156,15 +159,25 @@ class AzureBatch:
         batch_client.pool.add(new_pool)
 
     def create_job(self):
+        """
+        Creates a job. Must have a pool created BEFORE you attempt to run this.
+        TODO: Add a check that pool actually exists.
+        """
         batch_client = self._login_to_batch()
         job = batch.models.JobAddParameter(self.job_name, batch.models.PoolInformation(pool_id=self.job_name))
         batch_client.job.add(job)
 
     def delete_job(self):
+        """
+        Deletes a batch job. Add a check that the job exists before attempting deletion?
+        """
         batch_client = self._login_to_batch()
         batch_client.job.delete(job_id=self.job_name)
 
     def delete_pool(self):
+        """
+        Deletes a pool. Should also add a check that the pool exists and warn if it doesn't.
+        """
         batch_client = self._login_to_batch()
         batch_client.pool.delete(pool_id=self.job_name)
 
@@ -179,7 +192,7 @@ class AzureBatch:
                                                                batchmodels.OutputFileUploadCondition.task_success
                                                            )))
         # Also add stdout and stderr.txt log files from the azure container.
-        output_files.append(batchmodels.OutputFile('std*.txt',
+        output_files.append(batchmodels.OutputFile('../std*.txt',
                                                    destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url)),
                                                    upload_options=batchmodels.OutputFileUploadOptions(
                                                        batchmodels.OutputFileUploadCondition.task_success
