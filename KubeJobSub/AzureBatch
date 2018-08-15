@@ -239,7 +239,7 @@ class AzureBatch:
         blob_service.create_container(container_name=output_container_name)
         sas_token = blob_service.generate_container_shared_access_signature(container_name=output_container_name,
                                                                             permission=BlobPermissions.WRITE,
-                                                                            expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=2))
+                                                                            expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=24))
         sas_url = 'https://{}.blob.core.windows.net/{}?{}'.format(self.storage_account_name, output_container_name, sas_token)
         output_files = self.prepare_output_resource_files(sas_url)
         # TODO: this will be gone too once we actually have things set up properly.
