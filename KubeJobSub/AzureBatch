@@ -161,11 +161,6 @@ class AzureBatch:
             id=self.job_name,
             virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
                 image_reference=batchmodels.ImageReference(
-                    # publisher="Canonical",
-                    # offer="UbuntuServer",
-                    # sku="16.04-LTS",
-                    # version="latest",
-                    # TODO: Change this once this is figured out.
                     virtual_machine_image_id=self.vm_image,
                     ),
                 node_agent_sku_id="batch.node.ubuntu 16.04"),
@@ -242,10 +237,6 @@ class AzureBatch:
                                                                             expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=24))
         sas_url = 'https://{}.blob.core.windows.net/{}?{}'.format(self.storage_account_name, output_container_name, sas_token)
         output_files = self.prepare_output_resource_files(sas_url)
-        # TODO: this will be gone too once we actually have things set up properly.
-        confindr_database = batchmodels.ResourceFile(blob_source='https://carlingst01.blob.core.windows.net/databases/confindr.tar.gz',
-                                                     file_path='confindr.tar.gz')
-        input_files.append(confindr_database)
         batch_client = self._login_to_batch()
         task = batch.models.TaskAddParameter(
             id='Task1',
