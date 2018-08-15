@@ -192,8 +192,8 @@ You'll need three things:
 
 - an azure batch account
 - an azure storage account
-- an custom VM image in Azure that has any programs/databases you need to run your command pre-installed
- see (https://docs.microsoft.com/en-us/azure/batch/batch-custom-images) for details on how to create one.
+- an custom VM image in Azure that has any programs/databases you need to run your command pre-installed.
+See https://docs.microsoft.com/en-us/azure/batch/batch-custom-images for details on how to create one.
 
 If you have these, all you need to do is provide a configuration file, which needs the following information:
 
@@ -236,4 +236,33 @@ INPUT:=*.fastq.gz input_sequences
 OUTPUT:=processed_sequences/*
 VM_IMAGE:=/subscriptions/....
 COMMAND:=do_things.py --input input --output processed_sequences
+```
+
+### Actually Submitting Jobs
+
+All you need to do to run your job is `AzureBatch -c /path/to/config/file`.
+
+This will:
+
+- Upload files from your local machine to the Azure Cloud.
+- Start up a VM from the image specified in your configuration file and run your job.
+- Download any output files specified to your local machine in your current working directory.
+- Remove the VM and any files from Azure Storage.
+
+You'll also get the `stdout.txt` and `stderr.txt` files your job created downloaded to your local machine - useful for
+troubleshooting! If you don't want to have your output files downloaded and would prefer they remain in Azure Storage,
+activate the `-d` flag. Your output files will persist in blob storage in a container called `yourjobname-output`
+
+```
+usage: AzureBatch [-h] -c CONFIGURATION_FILE [-d]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -c CONFIGURATION_FILE, --configuration_file CONFIGURATION_FILE
+                        Path to your configuration file.
+  -d, --download_output_files
+                        By default, output files will be downloaded from blob
+                        storage to local machine and the blob files deleted.
+                        Activate this to not download files and keep them in
+                        blob storage.
 ```

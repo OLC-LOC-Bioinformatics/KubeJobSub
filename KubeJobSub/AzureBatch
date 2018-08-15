@@ -14,7 +14,10 @@ from azure.storage.blob import BlobPermissions
 import azure.batch.batch_service_client as batch
 import azure.batch.batch_auth as batch_auth
 import azure.batch.models as batchmodels
-
+# Apparently different credentials (through active directory) are needed in order to create a pool from a custom image.
+# Can't find documentation anywhere, but StackOverflow is at least somewhat helpful:
+# https://stackoverflow.com/questions/46756780/azure-batch-pool-how-do-i-use-a-custom-vm-image-via-python
+from azure.common.credentials import ServicePrincipalCredentials
 
 # TODO: Allow for multiple tasks to be submitted in one job.
 
@@ -56,6 +59,10 @@ class AzureBatch:
         self.vm_image = None
         self.vm_size = 'Standard_D16s_v3'  # This should be sufficient for essentially anything. User can customize
         # if they really need something bigger.
+        # Things needed for authentication through active directory, which is apparently necessary.
+        self.vm_client_id = None
+        self.vm_secret = None
+        self.vm_tenant = None
         # Both input and output will be nested lists.
         # Explain this to your future self better soon.
         self.input = list()
@@ -110,8 +117,7 @@ class AzureBatch:
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         # Create a container for input files - should be jobname-input, all lower case.
-        # TODO: Add a check that this will be a valid container name - probably way upstream of this
-        input_container_name = self.job_name.lower() + '-input'
+        input_container_name = self.job_name + '-input'
         blob_service.create_container(container_name=input_container_name)
         for input_request in self.input:
             # If input request is only one item, just upload that to default dir on cloud
@@ -139,17 +145,28 @@ class AzureBatch:
         """
         Creates a pool of Ubuntu16.04 machines.
         """
-        batch_client = self._login_to_batch()
+        # In order to have this work the VM we're running things from needs to have some stuff done to it.
+        # First, create a service principal for it:
+        # https://docs.microsoft.com/en-us/azure/azure-resource-manager/resource-group-create-service-principal-portal#required-permissions
+        # And then go to https://docs.microsoft.com/en-us/azure/batch/batch-aad-auth
+        # and follow the 'Use Integrated Authentication' to add Batch Service as something for your app to use.
+        credentials = ServicePrincipalCredentials(
+            client_id=self.vm_client_id,
+            secret=self.vm_secret,
+            tenant=self.vm_tenant,
+            resource='https://batch.core.windows.net/'
+        )
+        batch_client = batch.BatchServiceClient(credentials, base_url=self.batch_account_url)
         new_pool = batch.models.PoolAddParameter(
             id=self.job_name,
             virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
                 image_reference=batchmodels.ImageReference(
-                    publisher="Canonical",
-                    offer="UbuntuServer",
-                    sku="16.04-LTS",
-                    version="latest"
+                    # publisher="Canonical",
+                    # offer="UbuntuServer",
+                    # sku="16.04-LTS",
+                    # version="latest",
                     # TODO: Change this once this is figured out.
-                    # virtual_machine_image_id=self.vm_image,
+                    virtual_machine_image_id=self.vm_image,
                     ),
                 node_agent_sku_id="batch.node.ubuntu 16.04"),
             vm_size=self.vm_size,
@@ -199,17 +216,17 @@ class AzureBatch:
                                                    )))
         return output_files
 
-    def download_output_files_and_delete_container(self):
-        output_container = self.job_name.lower() + '-output'
+    def download_output_files_and_delete_container(self, output_dir):
+        output_container = self.job_name + '-output'
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         download_container(blob_service=blob_service,
                            container_name=output_container,
-                           output_dir='.')  # TODO: Make this an option that user can specify.
+                           output_dir=output_dir)
         blob_service.delete_container(container_name=output_container)
 
     def delete_input_container(self):
-        input_container = self.job_name.lower() + '-input'
+        input_container = self.job_name + '-input'
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         blob_service.delete_container(container_name=input_container)
@@ -218,7 +235,7 @@ class AzureBatch:
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         # Need an output container created.
-        output_container_name = self.job_name.lower() + '-output'
+        output_container_name = self.job_name + '-output'
         blob_service.create_container(container_name=output_container_name)
         sas_token = blob_service.generate_container_shared_access_signature(container_name=output_container_name,
                                                                             permission=BlobPermissions.WRITE,
@@ -250,6 +267,24 @@ class AzureBatch:
                 if task.state != batchmodels.TaskState.completed:
                     all_tasks_completed = False
             time.sleep(30)
+
+    def validate_job_name(self):
+        # Since we use job name as container name, need to conform to those standards. Job name must therefore be:
+        # 1) Lowercase
+        # 2) contain only letters, numbers, and hyphens (and never two hyphens in a row)
+        # 3) be between 3 and 63 characters.
+        if self.job_name.lower() != self.job_name:
+            raise AttributeError('Job name must be entirely lower case.')
+        if len(self.job_name) < 4 or len(self.job_name) > 63:
+            raise AttributeError('Job name must be between 3 and 63 characters. Your job, {name} has {name_length} '
+                                 'characters.'.format(name=self.job_name,
+                                                      name_length=len(self.job_name)))
+        if '--' in self.job_name or self.job_name.endswith('-'):
+            raise AttributeError('Hyphens are allowed in the job name, but you can have no more than one hyphen in '
+                                 'a row, and the job name cannot end with a hyphen.')
+        if self.job_name.replace('-', '').isalnum() is False:
+            raise AttributeError('Job names must contain only letters, numbers and hyphens. Special characters are '
+                                 'not allowed.')
 
 
 def parse_configuration_file(config_file):
@@ -317,6 +352,12 @@ def parse_configuration_file(config_file):
             azurebatch.vm_image = parameter
         elif option == 'VM_SIZE':
             azurebatch.vm_size = parameter
+        elif option == 'VM_CLIENT_ID':
+            azurebatch.vm_client_id = parameter
+        elif option == 'VM_SECRET':
+            azurebatch.vm_secret = parameter
+        elif option == 'VM_TENANT':
+            azurebatch.vm_tenant = parameter
         else:
             unrecognized_options.append(option)
 
@@ -358,11 +399,17 @@ if __name__ == '__main__':
                         help='By default, output files will be downloaded from blob storage to local machine '
                              'and the blob files deleted. Activate this to not download files and keep them in '
                              'blob storage.')
+    parser.add_argument('-o', '--output_dir',
+                        type=str,
+                        default='.',
+                        help='Directory where you want your output files stored. Defaults to your current working '
+                             'directory.')
     args = parser.parse_args()
 
     logging.info('Reading in configuration file {}...'.format(args.configuration_file))
     azurebatch = parse_configuration_file(args.configuration_file)
     check_no_attributes_none(azurebatch)
+    azurebatch.validate_job_name()
     logging.info('Configuration file validated. Uploading input files to blob storage...')
     resource_files = azurebatch.upload_input_to_blob_storage()
     logging.info('Creating pool and running tasks...')
@@ -375,5 +422,5 @@ if __name__ == '__main__':
     azurebatch.delete_pool()
     logging.info('Downloading output files...')
     if args.download_output_files:
-        azurebatch.download_output_files_and_delete_container()
+        azurebatch.download_output_files_and_delete_container(output_dir=args.output_dir)
     azurebatch.delete_input_container()
