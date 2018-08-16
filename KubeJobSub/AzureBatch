@@ -405,10 +405,16 @@ if __name__ == '__main__':
     check_no_attributes_none(azurebatch)
     azurebatch.validate_job_name()
     logging.info('Configuration file validated. Creating pool...')
+    # Create pool before uploading files - this way, the pool should (hopefully) be created by the time file
+    # upload finishes
     azurebatch.create_pool()
     logging.info('Uploading files...')
     # TODO: Add progress bar for each file for more user feedback?
-    resource_files = azurebatch.upload_input_to_blob_storage()
+    try:
+        resource_files = azurebatch.upload_input_to_blob_storage()
+    except:  # TODO: Double check the exception that comes up and make more specific.
+        azurebatch.delete_pool()
+        quit(code=1)
     logging.info('Running tasks...')
     azurebatch.create_job()
     azurebatch.create_task(input_files=resource_files)

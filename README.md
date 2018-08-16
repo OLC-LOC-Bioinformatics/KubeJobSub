@@ -214,7 +214,15 @@ in your current working directory and download all the FASTA files in the could 
 number of `OUTPUT` lines in your configuration file.
 - `VM_IMAGE`: The URL for a custom VM image that you've created with any necessary programs and databases to run
 your commands pre-installed. This image must be in the same subscription as your Azure Batch Account
-- `COMMAND`: The command you want to use to run your analysis.
+
+To get the VM client ID, secret, and tenant, follow [this guide](https://docs.microsoft.com/en-us/azure/azure-resource-manager/resource-group-create-service-principal-portal).
+You'll also need to check out the section called `Use Integrated Authentication` found [here](https://docs.microsoft.com/en-us/azure/batch/batch-aad-auth)
+in order to allow API access.
+- `VM_CLIENT_ID`: client ID, as found in above guide
+- `VM_SECRET`: secret key for VM, as found in guide
+- `VM_TENANT`: Tenant ID for VM, as found in guide.
+
+- `COMMAND`: The command you want to use to run your analysis
 
 If any of these parameters are missing, you will see an error message and the program will not proceed.
 
@@ -235,6 +243,10 @@ JOB_NAME:=myjob
 INPUT:=*.fastq.gz input_sequences
 OUTPUT:=processed_sequences/*
 VM_IMAGE:=/subscriptions/....
+VM_CLIENT_ID:=myvmclientid
+VM_SECRET:=myvmsecretkey
+VM_TENANT:=myvmtenantid
+
 COMMAND:=do_things.py --input input --output processed_sequences
 ```
 
