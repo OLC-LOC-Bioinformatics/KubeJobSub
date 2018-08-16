@@ -166,7 +166,7 @@ class AzureBatch:
                 node_agent_sku_id="batch.node.ubuntu 16.04"),
             vm_size=self.vm_size,
             target_dedicated_nodes=1,
-            target_low_priority_nodes=0,
+            target_low_priority_nodes=0
         )
         batch_client.pool.add(new_pool)
 
@@ -242,7 +242,10 @@ class AzureBatch:
             id='Task1',
             command_line="/bin/bash -c \"{}\"".format(self.command),
             resource_files=input_files,
-            output_files=output_files
+            output_files=output_files,
+            # Add this in so user doesn't have to tpye the entirety of the path to conda.
+            # Completely unclear on why I can't just modify the $PATH in order to make this work.
+            environment_settings=[batchmodels.EnvironmentSetting(name='CONDA', value='/usr/bin/miniconda/bin')]
             )
         batch_client.task.add(job_id=self.job_name, task=task)
 
@@ -401,12 +404,15 @@ if __name__ == '__main__':
     azurebatch = parse_configuration_file(args.configuration_file)
     check_no_attributes_none(azurebatch)
     azurebatch.validate_job_name()
-    logging.info('Configuration file validated. Uploading input files to blob storage...')
-    resource_files = azurebatch.upload_input_to_blob_storage()
-    logging.info('Creating pool and running tasks...')
+    logging.info('Configuration file validated. Creating pool...')
     azurebatch.create_pool()
+    logging.info('Uploading files...')
+    # TODO: Add progress bar for each file for more user feedback?
+    resource_files = azurebatch.upload_input_to_blob_storage()
+    logging.info('Running tasks...')
     azurebatch.create_job()
     azurebatch.create_task(input_files=resource_files)
+    # TODO: Add a check that task completed successfully, and provide some sort of info if it didn't
     azurebatch.wait_for_tasks_to_complete()
     logging.info('Tasks complete! Cleaning up pool...')
     azurebatch.delete_job()
