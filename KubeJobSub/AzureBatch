@@ -393,6 +393,10 @@ if __name__ == '__main__':
                         help='By default, output files will be downloaded from blob storage to local machine '
                              'and the blob files deleted. Activate this to not download files and keep them in '
                              'blob storage.')
+    parser.add_argument('-k', '--keep_input_container',
+                        default=False,
+                        action='store_true',
+                        help='By default, input container is deleted. Activate this flag to not delete the input container')
     parser.add_argument('-o', '--output_dir',
                         type=str,
                         default='.',
@@ -426,4 +430,5 @@ if __name__ == '__main__':
     logging.info('Downloading output files...')
     if args.download_output_files:
         azurebatch.download_output_files_and_delete_container(output_dir=args.output_dir)
-    azurebatch.delete_input_container()
+    if args.keep_input_container is False:
+        azurebatch.delete_input_container()
