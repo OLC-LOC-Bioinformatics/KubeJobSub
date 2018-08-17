@@ -229,12 +229,27 @@ class AzureBatch:
         output_files = list()
         for output_request in self.output[output_id]:
             for output_item in output_request.split():
-                output_files.append(batchmodels.OutputFile(output_item,
-                                                           destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
-                                                                                                                                                                  path=os.path.split(output_item)[0])),
-                                                           upload_options=batchmodels.OutputFileUploadOptions(
-                                                               batchmodels.OutputFileUploadCondition.task_success
-                                                           )))
+                # This means we're getting a directory, so need to go recursive
+                if output_item.endswith('/'):
+                    output_files.append(batchmodels.OutputFile(output_item + '*',
+                                                               destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
+                                                                                                                                                                      path=os.path.split(output_item)[0])),
+                                                               upload_options=batchmodels.OutputFileUploadOptions(
+                                                                   batchmodels.OutputFileUploadCondition.task_success
+                                                               )))
+                    output_files.append(batchmodels.OutputFile(output_item + '/**/*',
+                                                               destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
+                                                                                                                                                                      path=os.path.split(output_item)[0].replace('**', ''))),
+                                                               upload_options=batchmodels.OutputFileUploadOptions(
+                                                                   batchmodels.OutputFileUploadCondition.task_success
+                                                               )))
+                else:
+                    output_files.append(batchmodels.OutputFile(output_item,
+                                                               destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
+                                                                                                                                                                      path=os.path.split(output_item)[0])),
+                                                               upload_options=batchmodels.OutputFileUploadOptions(
+                                                                   batchmodels.OutputFileUploadCondition.task_success
+                                                               )))
         # Also add stdout and stderr.txt log files from the azure container. This is done even if task isn't successful
         output_files.append(batchmodels.OutputFile('../stderr.txt',
                                                    destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
