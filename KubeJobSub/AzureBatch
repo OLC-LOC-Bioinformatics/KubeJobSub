@@ -46,8 +46,9 @@ class AzureBatch:
     Class for doing azure batch operations to make job submission relatively easy.
     The parse_configuration_file function needs to be run to create one of these objects and set
     attributes, or things really won't work very well (or at all).
+    Should also run the checks to make sure that nothing is None (check_no_attributes_none) and that all keys
+    for the command, input, and output dictionaries are all present and matching (check_input_output_command_match)
     """
-    # TODO: Add check that each input id has corresponding output and command id
     def __init__(self):
         # Initially, have all these attrs set to None, and set them as needed.
         self.batch_account_name = None
@@ -56,19 +57,20 @@ class AzureBatch:
         self.storage_account_name = None
         self.storage_account_key = None
         self.job_name = None
-        self.command = dict()
         self.vm_image = None
         self.vm_size = 'Standard_D16s_v3'  # This should be sufficient for essentially anything. User can customize
-        # if they really need something bigger.
+        # if they really need something bigger (or smaller to save money)
         # Things needed for authentication through active directory, which is apparently necessary.
         self.vm_client_id = None
         self.vm_secret = None
         self.vm_tenant = None
         # Input and output both take the form of dictionaries that contain lists.
         # Keys for the dictionaries are input and output IDs - user can have INPUT_1 and INPUT_2 in the config file,
-        # and then we'll get inputs 1 and 2, each having their own files. Same idea for outputs.
+        # and then we'll get inputs 1 and 2, each having their own files. Same idea for outputs and commands.
+        # Any key in input has to be a key in output and command as well, and vice versa (all three ways)
         self.input = dict()
         self.output = dict()
+        self.command = dict()
 
     def _login_to_batch(self):
         """
@@ -124,23 +126,51 @@ class AzureBatch:
         for input_request in self.input[input_id]:
             # If input request is only one item, just upload that to default dir on cloud
             if len(input_request.split()) == 1:
-                files_to_upload = glob.glob(input_request)
-                for file_to_upload in files_to_upload:
-                    resource_files.append(self._create_resource_file(blob_service=blob_service,
-                                                                     file_to_upload=file_to_upload,
-                                                                     input_container_name=input_container_name))
+                if os.path.isdir(input_request):
+                    files_to_upload = recursive_file_list(input_request)
+                    last_item_on_path = os.path.split(input_request)[-1]
+                    for file_to_upload in files_to_upload:
+                        if not input_request.endswith('/'):
+                            input_request += '/'
+                        upload_to_dir = file_to_upload.split(input_request)[-1]
+                        upload_to_dir = os.path.split(upload_to_dir)[0]
+                        upload_to_dir = os.path.join(last_item_on_path, upload_to_dir)
+                        resource_files.append(self._create_resource_file(blob_service=blob_service,
+                                                                         file_to_upload=file_to_upload,
+                                                                         input_container_name=input_container_name,
+                                                                         destination_dir=upload_to_dir))
+                else:
+                    files_to_upload = glob.glob(input_request)
+                    for file_to_upload in files_to_upload:
+                        resource_files.append(self._create_resource_file(blob_service=blob_service,
+                                                                         file_to_upload=file_to_upload,
+                                                                         input_container_name=input_container_name))
 
             # If more than one item, last item is the destination directory on cloud vm that will run analysis.
             if len(input_request.split()) > 1:
                 things_to_upload = input_request.split()
                 destination_dir = things_to_upload.pop()
                 for thing in things_to_upload:
-                    files_to_upload = glob.glob(thing)
-                    for file_to_upload in files_to_upload:
-                        resource_files.append(self._create_resource_file(blob_service=blob_service,
-                                                                         file_to_upload=file_to_upload,
-                                                                         input_container_name=input_container_name,
-                                                                         destination_dir=destination_dir))
+                    if os.path.isdir(thing):
+                        files_to_upload = recursive_file_list(thing)
+                        last_item_on_path = os.path.split(thing)[-1]
+                        for file_to_upload in files_to_upload:
+                            if not thing.endswith('/'):
+                                thing += '/'
+                            upload_to_dir = file_to_upload.split(thing)[-1]
+                            upload_to_dir = os.path.split(upload_to_dir)[0]
+                            upload_to_dir = os.path.join(last_item_on_path, upload_to_dir)
+                            resource_files.append(self._create_resource_file(blob_service=blob_service,
+                                                                             file_to_upload=file_to_upload,
+                                                                             input_container_name=input_container_name,
+                                                                             destination_dir=os.path.join(destination_dir, upload_to_dir)))
+                    else:
+                        files_to_upload = glob.glob(thing)
+                        for file_to_upload in files_to_upload:
+                            resource_files.append(self._create_resource_file(blob_service=blob_service,
+                                                                             file_to_upload=file_to_upload,
+                                                                             input_container_name=input_container_name,
+                                                                             destination_dir=destination_dir))
         return resource_files
 
     def create_pool(self, num_nodes):
@@ -406,6 +436,18 @@ def parse_configuration_file(config_file):
     return azurebatch
 
 
+def recursive_file_list(directory):
+    file_list = glob.glob(os.path.join(directory, '**'), recursive=True)
+    # Need to delete any directories, because we don't want those.
+    items_to_remove = list()
+    for item in file_list:
+        if os.path.isdir(item):
+            items_to_remove.append(item)
+    for item in items_to_remove:
+        file_list.remove(item)
+    return file_list
+
+
 def check_no_attributes_none(azurebatch_object):
     missing_attributes = list()
     attrs = vars(azurebatch_object)
@@ -510,3 +552,4 @@ if __name__ == '__main__':
     if args.keep_input_container is False:
         for input_id in azurebatch.input:
             azurebatch.delete_input_container(input_id=input_id)
+    logging.info('Complete!')
