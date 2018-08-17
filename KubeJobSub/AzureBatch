@@ -47,6 +47,7 @@ class AzureBatch:
     The parse_configuration_file function needs to be run to create one of these objects and set
     attributes, or things really won't work very well (or at all).
     """
+    # TODO: Add check that each input id has corresponding output and command id
     def __init__(self):
         # Initially, have all these attrs set to None, and set them as needed.
         self.batch_account_name = None
@@ -55,7 +56,7 @@ class AzureBatch:
         self.storage_account_name = None
         self.storage_account_key = None
         self.job_name = None
-        self.command = None
+        self.command = dict()
         self.vm_image = None
         self.vm_size = 'Standard_D16s_v3'  # This should be sufficient for essentially anything. User can customize
         # if they really need something bigger.
@@ -63,10 +64,11 @@ class AzureBatch:
         self.vm_client_id = None
         self.vm_secret = None
         self.vm_tenant = None
-        # Both input and output will be nested lists.
-        # Explain this to your future self better soon.
-        self.input = list()
-        self.output = list()
+        # Input and output both take the form of dictionaries that contain lists.
+        # Keys for the dictionaries are input and output IDs - user can have INPUT_1 and INPUT_2 in the config file,
+        # and then we'll get inputs 1 and 2, each having their own files. Same idea for outputs.
+        self.input = dict()
+        self.output = dict()
 
     def _login_to_batch(self):
         """
@@ -107,7 +109,7 @@ class AzureBatch:
             return batchmodels.ResourceFile(file_path=os.path.split(file_to_upload)[-1],
                                             blob_source=sas_url)
 
-    def upload_input_to_blob_storage(self):
+    def upload_input_to_blob_storage(self, input_id):
         """
         Uploads input files to blob storage to be used with batch service.
         :return: List of resource files (azure.batch.models.ResourceFile) to be submitted with a task
@@ -116,10 +118,10 @@ class AzureBatch:
         resource_files = list()
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
-        # Create a container for input files - should be jobname-input, all lower case.
-        input_container_name = self.job_name + '-input'
+        # Create a container for each input request - should be jobname-input, all lower case.
+        input_container_name = self.job_name + '-input' + input_id
         blob_service.create_container(container_name=input_container_name)
-        for input_request in self.input:
+        for input_request in self.input[input_id]:
             # If input request is only one item, just upload that to default dir on cloud
             if len(input_request.split()) == 1:
                 files_to_upload = glob.glob(input_request)
@@ -141,7 +143,7 @@ class AzureBatch:
                                                                          destination_dir=destination_dir))
         return resource_files
 
-    def create_pool(self):
+    def create_pool(self, num_nodes):
         """
         Creates a pool of Ubuntu16.04 machines.
         """
@@ -165,7 +167,7 @@ class AzureBatch:
                     ),
                 node_agent_sku_id="batch.node.ubuntu 16.04"),
             vm_size=self.vm_size,
-            target_dedicated_nodes=1,
+            target_dedicated_nodes=num_nodes,
             target_low_priority_nodes=0
         )
         batch_client.pool.add(new_pool)
@@ -193,9 +195,9 @@ class AzureBatch:
         batch_client = self._login_to_batch()
         batch_client.pool.delete(pool_id=self.job_name)
 
-    def prepare_output_resource_files(self, sas_url):
+    def prepare_output_resource_files(self, sas_url, output_id):
         output_files = list()
-        for output_request in self.output:
+        for output_request in self.output[output_id]:
             for output_item in output_request.split():
                 output_files.append(batchmodels.OutputFile(output_item,
                                                            destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
@@ -211,8 +213,8 @@ class AzureBatch:
                                                    )))
         return output_files
 
-    def download_output_files_and_delete_container(self, output_dir):
-        output_container = self.job_name + '-output'
+    def download_output_files_and_delete_container(self, output_dir, output_id):
+        output_container = self.job_name + '-output' + output_id
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         download_container(blob_service=blob_service,
@@ -220,27 +222,27 @@ class AzureBatch:
                            output_dir=output_dir)
         blob_service.delete_container(container_name=output_container)
 
-    def delete_input_container(self):
-        input_container = self.job_name + '-input'
+    def delete_input_container(self, input_id):
+        input_container = self.job_name + '-input' + input_id
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         blob_service.delete_container(container_name=input_container)
 
-    def create_task(self, input_files):
+    def create_task(self, input_files, command_id):
         blob_service = BlockBlobService(account_key=self.storage_account_key,
                                         account_name=self.storage_account_name)
         # Need an output container created.
-        output_container_name = self.job_name + '-output'
+        output_container_name = self.job_name + '-output' + command_id
         blob_service.create_container(container_name=output_container_name)
         sas_token = blob_service.generate_container_shared_access_signature(container_name=output_container_name,
                                                                             permission=BlobPermissions.WRITE,
                                                                             expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=24))
         sas_url = 'https://{}.blob.core.windows.net/{}?{}'.format(self.storage_account_name, output_container_name, sas_token)
-        output_files = self.prepare_output_resource_files(sas_url)
+        output_files = self.prepare_output_resource_files(sas_url, output_id=command_id)
         batch_client = self._login_to_batch()
         task = batch.models.TaskAddParameter(
-            id='Task1',
-            command_line="/bin/bash -c \"{}\"".format(self.command),
+            id='Task' + command_id,
+            command_line="/bin/bash -c \"{}\"".format(self.command[command_id]),
             resource_files=input_files,
             output_files=output_files,
             # Add this in so user doesn't have to tpye the entirety of the path to conda.
@@ -279,6 +281,13 @@ class AzureBatch:
         if self.job_name.replace('-', '').isalnum() is False:
             raise AttributeError('Job names must contain only letters, numbers and hyphens. Special characters are '
                                  'not allowed.')
+
+
+def sanitize_id(identifier):
+    if identifier.isalnum() is False:
+        raise AttributeError('Input/output/command names must contain only letters, numbers and hyphens. Special '
+                             'characters are not allowed. Your identifier was: {}'.format(identifier))
+    return identifier.lower()
 
 
 def parse_configuration_file(config_file):
@@ -336,12 +345,30 @@ def parse_configuration_file(config_file):
             azurebatch.storage_account_key = parameter
         elif option == 'JOB_NAME':
             azurebatch.job_name = parameter
-        elif option == 'COMMAND':
-            azurebatch.command = parameter
-        elif option == 'INPUT':
-            azurebatch.input.append(parameter)
-        elif option == 'OUTPUT':
-            azurebatch.output.append(parameter)
+        elif 'COMMAND' in option:
+            if len(option.split('_')) == 2:
+                command_id = sanitize_id(option.split('_')[1])
+            else:
+                command_id = ''
+            azurebatch.command[command_id] = parameter
+        elif 'INPUT' in option:
+            if len(option.split('_')) == 2:
+                input_id = sanitize_id(option.split('_')[1])
+            else:
+                input_id = ''
+            if input_id not in azurebatch.input:
+                azurebatch.input[input_id] = [parameter]
+            else:
+                azurebatch.input[input_id].append(parameter)
+        elif 'OUTPUT' in option:
+            if len(option.split('_')) == 2:
+                output_id = sanitize_id(option.split('_')[1])
+            else:
+                output_id = ''
+            if output_id not in azurebatch.output:
+                azurebatch.output[output_id] = [parameter]
+            else:
+                azurebatch.output[output_id].append(parameter)
         elif option == 'VM_IMAGE':
             azurebatch.vm_image = parameter
         elif option == 'VM_SIZE':
@@ -378,6 +405,27 @@ def check_no_attributes_none(azurebatch_object):
                              'configuration file: {}'.format(missing_attributes))
 
 
+def check_input_output_command_match(azurebatch_object):
+    # Check input has corresponding outputs and commands.
+    for input_id in azurebatch_object.input:
+        if input_id not in azurebatch_object.output:
+            raise AttributeError('Input ID {} is present, but there is no corresponding output ID.')
+        if input_id not in azurebatch_object.command:
+            raise AttributeError('Input ID {} is present, but there is no corresponding command ID.')
+    # Check output has corresponding inputs and commands.
+    for output_id in azurebatch_object.output:
+        if output_id not in azurebatch_object.input:
+            raise AttributeError('Output ID {} is present, but there is no corresponding input ID.')
+        if output_id not in azurebatch_object.command:
+            raise AttributeError('Output ID {} is present, but there is no corresponding command ID.')
+    # Check commands have correspoding inputs and outputs
+    for command_id in azurebatch_object.command:
+        if command_id not in azurebatch_object.input:
+            raise AttributeError('Command ID {} is present, but there is no corresponding input ID.')
+        if command_id not in azurebatch_object.output:
+            raise AttributeError('Command ID {} is present, but there is no corresponding output ID.')
+
+
 if __name__ == '__main__':
     logging.basicConfig(format='\033[92m \033[1m %(asctime)s \033[0m %(message)s ',
                         level=logging.INFO,
@@ -396,10 +444,10 @@ if __name__ == '__main__':
     parser.add_argument('-k', '--keep_input_container',
                         default=False,
                         action='store_true',
-                        help='By default, input container is deleted. Activate this flag to not delete the input container')
+                        help='By default, input container is deleted. Activate this to not delete the input container')
     parser.add_argument('-o', '--output_dir',
                         type=str,
-                        default='.',
+                        default=os.getcwd(),
                         help='Directory where you want your output files stored. Defaults to your current working '
                              'directory.')
     args = parser.parse_args()
@@ -408,20 +456,24 @@ if __name__ == '__main__':
     azurebatch = parse_configuration_file(args.configuration_file)
     check_no_attributes_none(azurebatch)
     azurebatch.validate_job_name()
+    check_input_output_command_match(azurebatch)
     logging.info('Configuration file validated. Creating pool...')
     # Create pool before uploading files - this way, the pool should (hopefully) be created by the time file
-    # upload finishes
-    azurebatch.create_pool()
+    # upload finishes, depending on how large the input files are.
+    azurebatch.create_pool(num_nodes=len(azurebatch.input))
     logging.info('Uploading files...')
     # TODO: Add progress bar for each file for more user feedback?
+    resource_files = dict()
     try:
-        resource_files = azurebatch.upload_input_to_blob_storage()
+        for input_id in azurebatch.input:
+            resource_files[input_id] = azurebatch.upload_input_to_blob_storage(input_id=input_id)
     except:  # TODO: Double check the exception that comes up and make more specific.
         azurebatch.delete_pool()
         quit(code=1)
     logging.info('Running tasks...')
     azurebatch.create_job()
-    azurebatch.create_task(input_files=resource_files)
+    for command_id in azurebatch.command:
+        azurebatch.create_task(input_files=resource_files[command_id], command_id=command_id)
     # TODO: Add a check that task completed successfully, and provide some sort of info if it didn't
     azurebatch.wait_for_tasks_to_complete()
     logging.info('Tasks complete! Cleaning up pool...')
@@ -429,6 +481,8 @@ if __name__ == '__main__':
     azurebatch.delete_pool()
     logging.info('Downloading output files...')
     if args.download_output_files:
-        azurebatch.download_output_files_and_delete_container(output_dir=args.output_dir)
+        for output_id in azurebatch.output:
+            azurebatch.download_output_files_and_delete_container(output_dir=args.output_dir, output_id=output_id)
     if args.keep_input_container is False:
-        azurebatch.delete_input_container()
+        for input_id in azurebatch.input:
+            azurebatch.delete_input_container(input_id=input_id)
