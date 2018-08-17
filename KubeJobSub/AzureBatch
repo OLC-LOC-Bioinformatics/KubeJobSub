@@ -205,12 +205,19 @@ class AzureBatch:
                                                            upload_options=batchmodels.OutputFileUploadOptions(
                                                                batchmodels.OutputFileUploadCondition.task_success
                                                            )))
-        # Also add stdout and stderr.txt log files from the azure container.
-        output_files.append(batchmodels.OutputFile('../std*.txt',
-                                                   destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url)),
+        # Also add stdout and stderr.txt log files from the azure container. This is done even if task isn't successful
+        output_files.append(batchmodels.OutputFile('../stderr.txt',
+                                                   destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
+                                                                                                                                                          path=self.job_name + '_' + output_id + '_stderr.txt')),
                                                    upload_options=batchmodels.OutputFileUploadOptions(
-                                                       batchmodels.OutputFileUploadCondition.task_success
-                                                   )))
+                                                       batchmodels.OutputFileUploadCondition.task_completion)
+                                                   ))
+        output_files.append(batchmodels.OutputFile('../stdout.txt',
+                                                   destination=batchmodels.OutputFileDestination(container=batchmodels.OutputFileBlobContainerDestination(container_url=sas_url,
+                                                                                                                                                          path=self.job_name + '_' + output_id + '_stdout.txt')),
+                                                   upload_options=batchmodels.OutputFileUploadOptions(
+                                                       batchmodels.OutputFileUploadCondition.task_completion)
+                                                   ))
         return output_files
 
     def download_output_files_and_delete_container(self, output_dir, output_id):
@@ -241,7 +248,7 @@ class AzureBatch:
         output_files = self.prepare_output_resource_files(sas_url, output_id=command_id)
         batch_client = self._login_to_batch()
         task = batch.models.TaskAddParameter(
-            id='Task' + command_id,
+            id=self.job_name + command_id,
             command_line="/bin/bash -c \"{}\"".format(self.command[command_id]),
             resource_files=input_files,
             output_files=output_files,
@@ -263,6 +270,14 @@ class AzureBatch:
                 if task.state != batchmodels.TaskState.completed:
                     all_tasks_completed = False
             time.sleep(30)
+
+    def check_task_exit_codes(self):
+        exit_codes = dict()
+        batch_client = self._login_to_batch()
+        tasks = batch_client.task.list(self.job_name)
+        for task in tasks:
+            exit_codes[task.id] = task.execution_info.exit_code
+        return exit_codes
 
     def validate_job_name(self):
         # Since we use job name as container name, need to conform to those standards. Job name must therefore be:
@@ -468,14 +483,23 @@ if __name__ == '__main__':
         for input_id in azurebatch.input:
             resource_files[input_id] = azurebatch.upload_input_to_blob_storage(input_id=input_id)
     except:  # TODO: Double check the exception that comes up and make more specific.
+        logging.error('ERROR: Upload of local files to cloud failed. Please try again.')
         azurebatch.delete_pool()
         quit(code=1)
     logging.info('Running tasks...')
     azurebatch.create_job()
     for command_id in azurebatch.command:
         azurebatch.create_task(input_files=resource_files[command_id], command_id=command_id)
-    # TODO: Add a check that task completed successfully, and provide some sort of info if it didn't
+    # With tasks submitted, wait for all to reach a 'completed' state.
     azurebatch.wait_for_tasks_to_complete()
+    # Check task exit codes. Warn user if the tasks did not have a 0 (success) exit code.
+    task_exit_codes = azurebatch.check_task_exit_codes()
+    for task_id in task_exit_codes:
+        if task_exit_codes[task_id] != 0:
+            logging.error('ERROR: Task {} did not complete successfully (exit code {}). See the stderr and stdout '
+                          'files of that task for more information.'.format(task_id, task_exit_codes[task_id]))
+
+    # Clean up resources so that we don't spend exorbitant amounts of money.
     logging.info('Tasks complete! Cleaning up pool...')
     azurebatch.delete_job()
     azurebatch.delete_pool()
