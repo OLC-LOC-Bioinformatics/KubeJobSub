@@ -19,8 +19,6 @@ import azure.batch.models as batchmodels
 # https://stackoverflow.com/questions/46756780/azure-batch-pool-how-do-i-use-a-custom-vm-image-via-python
 from azure.common.credentials import ServicePrincipalCredentials
 
-# TODO: Allow for multiple tasks to be submitted in one job.
-
 
 def download_container(blob_service, container_name, output_dir):
     # Modified from https://blogs.msdn.microsoft.com/brijrajsingh/2017/05/27/downloading-a-azure-blob-storage-container-python/
@@ -558,7 +556,7 @@ if __name__ == '__main__':
     for task_id in task_exit_codes:
         if args.exit_code_file:
             with open(args.exit_code_file, 'a+') as f:
-                f.write('{},{}'.format(task_id, task_exit_codes[task_id]))
+                f.write('{},{}\n'.format(task_id, task_exit_codes[task_id]))
         if task_exit_codes[task_id] != 0:
             logging.error('ERROR: Task {} did not complete successfully (exit code {}). See the stderr and stdout '
                           'files of that task for more information.'.format(task_id, task_exit_codes[task_id]))
