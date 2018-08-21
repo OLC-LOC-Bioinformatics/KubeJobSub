@@ -522,6 +522,10 @@ if __name__ == '__main__':
                         default=os.getcwd(),
                         help='Directory where you want your output files stored. Defaults to your current working '
                              'directory.')
+    parser.add_argument('-e', '--exit_code_file',
+                        type=str,
+                        required=False,
+                        help='If specified, will create a file that stores the exit code for each task.')
     args = parser.parse_args()
 
     logging.info('Reading in configuration file {}...'.format(args.configuration_file))
@@ -552,6 +556,9 @@ if __name__ == '__main__':
     # Check task exit codes. Warn user if the tasks did not have a 0 (success) exit code.
     task_exit_codes = azurebatch.check_task_exit_codes()
     for task_id in task_exit_codes:
+        if args.exit_code_file:
+            with open(args.exit_code_file, 'a+') as f:
+                f.write('{},{}'.format(task_id, task_exit_codes[task_id]))
         if task_exit_codes[task_id] != 0:
             logging.error('ERROR: Task {} did not complete successfully (exit code {}). See the stderr and stdout '
                           'files of that task for more information.'.format(task_id, task_exit_codes[task_id]))
