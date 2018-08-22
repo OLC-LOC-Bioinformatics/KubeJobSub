@@ -15,10 +15,13 @@ from azure.storage.blob import BlobPermissions
 import azure.batch.batch_service_client as batch
 import azure.batch.batch_auth as batch_auth
 import azure.batch.models as batchmodels
+import msrest
 # Apparently different credentials (through active directory) are needed in order to create a pool from a custom image.
 # Can't find documentation anywhere, but StackOverflow is at least somewhat helpful:
 # https://stackoverflow.com/questions/46756780/azure-batch-pool-how-do-i-use-a-custom-vm-image-via-python
 from azure.common.credentials import ServicePrincipalCredentials
+
+# TODO: Make some custom errors with better names so that not everything is an AttributeError
 
 
 def download_container(blob_service, container_name, output_dir):
@@ -84,6 +87,13 @@ class AzureBatch:
         """
         credentials = batch_auth.SharedKeyCredentials(self.batch_account_name, self.batch_account_key)
         batch_client = batch.BatchServiceClient(credentials, base_url=self.batch_account_url)
+        try:  # Try an operation that will error if the batch client credentials were not correct.
+            batch_client.pool.get_all_lifetime_statistics()
+        except batchmodels.BatchErrorException:  # This exception occurs if KEY or NAME is incorrect.
+            raise AttributeError('Batch client could not be authenticated. Likely cause is your BATCH_ACCOUNT_KEY or'
+                                 'BATCH_ACCOUNT_NAME being incorrect.')
+        except msrest.exceptions.ClientRequestError:  # This occurs when the provided URL is incorrect.
+            raise AttributeError('Batch client could not be authenticated. Check that your BATCH_ACCOUNT_URL is correct.')
         return batch_client
 
     @staticmethod
@@ -259,10 +269,13 @@ class AzureBatch:
     def create_job(self):
         """
         Creates a job. Must have a pool created BEFORE you attempt to run this.
-        TODO: Add a check that pool actually exists.
         """
         batch_client = self._login_to_batch()
-        job = batch.models.JobAddParameter(self.job_name, batch.models.PoolInformation(pool_id=self.job_name))
+        if batch_client.pool.exists(pool_id=self.job_name):
+            job = batch.models.JobAddParameter(self.job_name, batch.models.PoolInformation(pool_id=self.job_name))
+        else:
+            raise AttributeError('Job {} was added to a pool that does not exist. Pool must exist before a '
+                                 'job can be added to that pool.'.format(self.job_name))
         batch_client.job.add(job)
 
     def delete_job(self):
@@ -274,10 +287,13 @@ class AzureBatch:
 
     def delete_pool(self):
         """
-        Deletes a pool. Should also add a check that the pool exists and warn if it doesn't.
+        Deletes a pool. Raises AttributeError if pool trying to be deleted does not exist.
         """
         batch_client = self._login_to_batch()
-        batch_client.pool.delete(pool_id=self.job_name)
+        if batch_client.pool.exists(pool_id=self.job_name):
+            batch_client.pool.delete(pool_id=self.job_name)
+        else:
+            raise AttributeError('Pool {} does not exist, and therefore cannot be deleted.'.format(self.job_name))
 
     def prepare_output_resource_files(self, sas_url, output_id):
         output_files = list()

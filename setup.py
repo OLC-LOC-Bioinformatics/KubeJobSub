@@ -15,5 +15,6 @@ setup(
                       'termcolor',
                       'azure-batch',
                       'azure-common',
-                      'azure-storage']
+                      'azure-storage',
+                      'pytest']
 )
