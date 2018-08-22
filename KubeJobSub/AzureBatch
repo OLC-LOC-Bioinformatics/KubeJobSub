@@ -4,6 +4,7 @@
 import argparse
 import datetime
 import logging
+import fnmatch
 import time
 import glob
 import os
@@ -69,6 +70,12 @@ class AzureBatch:
         self.input = dict()
         self.output = dict()
         self.command = dict()
+        # Make it so that we can also use things that are already in blob storage.
+        # These input file lines should be CLOUDIN:= with _1 or whatever, same is input/output/command.
+        # A full proper line would be CLOUDIN:=container_name/ destination_dir
+        # This would get everything in container_name and put it into destination_dir, while preserving directory
+        # structure if there was any
+        self.cloud_input = dict()
 
     def _login_to_batch(self):
         """
@@ -108,6 +115,55 @@ class AzureBatch:
         else:
             return batchmodels.ResourceFile(file_path=os.path.split(file_to_upload)[-1],
                                             blob_source=sas_url)
+
+    def prepare_cloud_input_resource_files(self, input_id):
+        """
+        Creates resource files for input files already in blob storage to be used with batch service.
+        :return: List of resource files (azure.batch.models.ResourceFile) to be submitted with a task
+        """
+        resource_files = list()
+        blob_service = BlockBlobService(account_key=self.storage_account_key,
+                                        account_name=self.storage_account_name)
+        for input_request in self.cloud_input[input_id]:
+            # Only one thing specified means no destination dir specified
+            if len(input_request.split()) == 1:
+                container_name = os.path.split(input_request)[0]
+                sas_token = blob_service.generate_container_shared_access_signature(container_name=container_name,
+                                                                                    permission=BlobPermissions.READ,
+                                                                                    expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=2))
+                pattern = os.path.split(input_request)[1]
+                if pattern == '':
+                    pattern = '*'
+                generator = blob_service.list_blobs(container_name=container_name)
+                for blob in generator:
+                    if fnmatch.fnmatch(blob.name, pattern):
+                        sas_url = blob_service.make_blob_url(container_name=container_name,
+                                                             blob_name=blob.name,
+                                                             sas_token=sas_token)
+                        resource = batchmodels.ResourceFile(file_path=blob.name,
+                                                            blob_source=sas_url)
+                        resource_files.append(resource)
+            else:
+                things_to_upload = input_request.split()
+                destination_dir = things_to_upload.pop()
+                for item in things_to_upload:
+                    container_name = os.path.split(item)[0]
+                    sas_token = blob_service.generate_container_shared_access_signature(container_name=container_name,
+                                                                                        permission=BlobPermissions.READ,
+                                                                                        expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=2))
+                    pattern = os.path.split(item)[1]
+                    if pattern == '':
+                        pattern = '*'
+                    generator = blob_service.list_blobs(container_name=container_name)
+                    for blob in generator:
+                        if fnmatch.fnmatch(blob.name, pattern):
+                            sas_url = blob_service.make_blob_url(container_name=container_name,
+                                                                 blob_name=blob.name,
+                                                                 sas_token=sas_token)
+                            resource = batchmodels.ResourceFile(file_path=os.path.join(destination_dir, blob.name),
+                                                                blob_source=sas_url)
+                            resource_files.append(resource)
+        return resource_files
 
     def upload_input_to_blob_storage(self, input_id):
         """
@@ -418,6 +474,15 @@ def parse_configuration_file(config_file):
                 azurebatch.input[input_id] = [parameter]
             else:
                 azurebatch.input[input_id].append(parameter)
+        elif 'CLOUDIN' in option:
+            if len(option.split('_')) == 2:
+                input_id = sanitize_id(option.split('_')[1])
+            else:
+                input_id = ''
+            if input_id not in azurebatch.cloud_input:
+                azurebatch.cloud_input[input_id] = [parameter]
+            else:
+                azurebatch.cloud_input[input_id].append(parameter)
         elif 'OUTPUT' in option:
             if len(option.split('_')) == 2:
                 output_id = sanitize_id(option.split('_')[1])
@@ -484,13 +549,13 @@ def check_input_output_command_match(azurebatch_object):
             raise AttributeError('Input ID {} is present, but there is no corresponding command ID.')
     # Check output has corresponding inputs and commands.
     for output_id in azurebatch_object.output:
-        if output_id not in azurebatch_object.input:
+        if output_id not in azurebatch_object.input and output_id not in azurebatch_object.cloud_input:
             raise AttributeError('Output ID {} is present, but there is no corresponding input ID.')
         if output_id not in azurebatch_object.command:
             raise AttributeError('Output ID {} is present, but there is no corresponding command ID.')
     # Check commands have correspoding inputs and outputs
     for command_id in azurebatch_object.command:
-        if command_id not in azurebatch_object.input:
+        if command_id not in azurebatch_object.input and command_id not in azurebatch_object.cloud_input:
             raise AttributeError('Command ID {} is present, but there is no corresponding input ID.')
         if command_id not in azurebatch_object.output:
             raise AttributeError('Command ID {} is present, but there is no corresponding output ID.')
@@ -534,17 +599,27 @@ if __name__ == '__main__':
     logging.info('Configuration file validated. Creating pool...')
     # Create pool before uploading files - this way, the pool should (hopefully) be created by the time file
     # upload finishes, depending on how large the input files are.
-    azurebatch.create_pool(num_nodes=len(azurebatch.input))
+    azurebatch.create_pool(num_nodes=len(azurebatch.command))
     logging.info('Uploading files...')
     # TODO: Add progress bar for each file for more user feedback?
     resource_files = dict()
     try:
         for input_id in azurebatch.input:
             resource_files[input_id] = azurebatch.upload_input_to_blob_storage(input_id=input_id)
-    except:  # TODO: Double check the exception that comes up and make more specific.
+    except:  # TODO: Double check the exception that comes up on upload timeout and make more specific.
         logging.error('ERROR: Upload of local files to cloud failed. Please try again.')
         azurebatch.delete_pool()
         quit(code=1)
+
+    # Also use cloud files already in blob storage as input, if specified.
+    for input_id in azurebatch.cloud_input:
+        cloud_resource = azurebatch.prepare_cloud_input_resource_files(input_id=input_id)
+        for resource in cloud_resource:
+            if input_id in resource_files:
+                resource_files[input_id].append(resource)
+            else:
+                resource_files[input_id] = [resource]
+
     logging.info('Running tasks...')
     azurebatch.create_job()
     for command_id in azurebatch.command:
