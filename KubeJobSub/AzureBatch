@@ -646,6 +646,7 @@ if __name__ == '__main__':
         azurebatch.create_task(input_files=resource_files[command_id], command_id=command_id)
     # With tasks submitted, wait for all to reach a 'completed' state.
     azurebatch.wait_for_tasks_to_complete()
+    task_exit_codes = azurebatch.check_task_exit_codes()
 
     # Clean up resources so that we don't spend exorbitant amounts of money.
     logging.info('Tasks complete! Cleaning up pool...')
@@ -660,7 +661,6 @@ if __name__ == '__main__':
             azurebatch.delete_input_container(input_id=input_id)
 
     # Check task exit codes. Warn user if the tasks did not have a 0 (success) exit code.
-    task_exit_codes = azurebatch.check_task_exit_codes()
     for task_id in task_exit_codes:
         if args.exit_code_file:
             with open(args.exit_code_file, 'a+') as f:
