@@ -625,6 +625,10 @@ if __name__ == '__main__':
     except:  # TODO: Double check the exception that comes up on upload timeout and make more specific.
         logging.error('ERROR: Upload of local files to cloud failed. Please try again.')
         azurebatch.delete_pool()
+        if args.exit_code_file:  # Update exit code file with a non-zero code if upload failed.
+            with open(args.exit_code_file, 'a+') as f:
+                for command_id in azurebatch.command:
+                    f.write('{},{}\n'.format(azurebatch.job_name + command_id, '1'))
         quit(code=1)
 
     # Also use cloud files already in blob storage as input, if specified.
