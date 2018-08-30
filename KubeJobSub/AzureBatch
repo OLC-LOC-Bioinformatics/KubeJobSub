@@ -165,7 +165,7 @@ class AzureBatch:
                 for item in generator:
                     blobs.append(item)
                 for item in things_to_upload:
-                    container_name = os.path.split(item)[0]
+                    container_name = item.split('/')[0]
                     sas_token = blob_service.generate_container_shared_access_signature(container_name=container_name,
                                                                                         permission=BlobPermissions.READ,
                                                                                         expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=2))
