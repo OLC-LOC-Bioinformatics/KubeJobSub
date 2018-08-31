@@ -205,12 +205,10 @@ If you have these, all you need to do is provide a configuration file, which nee
 - `JOB_NAME`: A name to give your job - this must be unique among currently running jobs within your Azure Batch account.
 - `INPUT`: Files that you want to have as input for your job. This is done in a unix `mv` fashion. If, for example, you
 wanted to put all `.fastq.gz` files in your current directory into a folder called `raw_data` for your batch job,
-you would put `*.fastq.gz raw_data`. Upload of entire directories does not work at this time, but wildcards are fully
-supported. You may have any number of `INPUT` lines in your configuration file.
-- `OUTPUT`: Output files from your job you want. Again, directories aren't entirely supported at this time, but
-wildcards are. If you wanted to get all `.fasta` files out of a directory called `processed_sequence_data` on the cloud
-machine, you would put `processed_sequence_data/*.fasta` here. This will create a folder called `processed_sequence_data`
-in your current working directory and download all the FASTA files in the could machine to it. You may specify any
+you would put `*.fastq.gz raw_data`. You can also upload entire directories - the script will check if the path
+is a directory on your system, and if it is, files will be uploaded while preserving directory structure.
+- `OUTPUT`: Output files from your job you want. To recursively download a directory by adding a / to the end of your
+output path. eate a folder called `processed_sequence_data`. You may specify any
 number of `OUTPUT` lines in your configuration file.
 - `VM_IMAGE`: The URL for a custom VM image that you've created with any necessary programs and databases to run
 your commands pre-installed. This image must be in the same subscription as your Azure Batch Account
@@ -266,7 +264,8 @@ troubleshooting! If you don't want to have your output files downloaded and woul
 activate the `-d` flag. Your output files will persist in blob storage in a container called `yourjobname-output`
 
 ```
-usage: AzureBatch [-h] -c CONFIGURATION_FILE [-d]
+usage: AzureBatch [-h] -c CONFIGURATION_FILE [-d] [-k] [-o OUTPUT_DIR]
+                  [-e EXIT_CODE_FILE]
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -277,4 +276,13 @@ optional arguments:
                         storage to local machine and the blob files deleted.
                         Activate this to not download files and keep them in
                         blob storage.
+  -k, --keep_input_container
+                        By default, input container is deleted. Activate this
+                        to not delete the input container
+  -o OUTPUT_DIR, --output_dir OUTPUT_DIR
+                        Directory where you want your output files stored.
+                        Defaults to your current working directory.
+  -e EXIT_CODE_FILE, --exit_code_file EXIT_CODE_FILE
+                        If specified, will create a file that stores the exit
+                        code for each task.
 ```
