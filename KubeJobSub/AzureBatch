@@ -44,8 +44,10 @@ def download_container(blob_service, container_name, output_dir):
         else:
             blob_service.get_blob_to_path(container_name, blob.name, blob.name)
 
+
 def random_string(string_length):
     return ''.join(random.choice(string.ascii_letters) for m in range(string_length))
+
 
 class AzureBatch:
     """
@@ -426,6 +428,10 @@ class AzureBatch:
         # 1) Lowercase
         # 2) contain only letters, numbers, and hyphens (and never two hyphens in a row)
         # 3) be between 3 and 63 characters.
+        """
+        Returns true if job name is good
+        :return:
+        """
         if self.job_name.lower() != self.job_name:
             raise AttributeError('Job name must be entirely lower case.')
         if len(self.job_name) < 4 or len(self.job_name) > 63:
@@ -438,10 +444,11 @@ class AzureBatch:
         if self.job_name.replace('-', '').isalnum() is False:
             raise AttributeError('Job names must contain only letters, numbers and hyphens. Special characters are '
                                  'not allowed.')
+        return True
 
 
 def sanitize_id(identifier):
-    if identifier.isalnum() is False:
+    if identifier.replace('-', '').isalnum() is False:
         raise AttributeError('Input/output/command names must contain only letters, numbers and hyphens. Special '
                              'characters are not allowed. Your identifier was: {}'.format(identifier))
     return identifier.lower()

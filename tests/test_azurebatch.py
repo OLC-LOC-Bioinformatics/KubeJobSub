@@ -146,3 +146,53 @@ def test_upload_nested_dir_same_filenames():
     blob_client.delete_container(container_name=azurebatch.job_name + '-input')
 
 
+def test_validate_job_name_good():
+    azurebatch = parse_configuration_file('tests/valid_credentials.txt')
+    azurebatch.job_name = 'good-job-name'
+    assert azurebatch.validate_job_name() is True
+
+
+def test_validate_job_name_uppercase():
+    azurebatch = parse_configuration_file('tests/valid_credentials.txt')
+    azurebatch.job_name = 'JOBNAME'
+    with pytest.raises(AttributeError):
+        azurebatch.validate_job_name()
+
+
+def test_validate_job_name_too_short():
+    azurebatch = parse_configuration_file('tests/valid_credentials.txt')
+    azurebatch.job_name = 'job'
+    with pytest.raises(AttributeError):
+        azurebatch.validate_job_name()
+
+
+def test_validate_job_name_too_long():
+    azurebatch = parse_configuration_file('tests/valid_credentials.txt')
+    azurebatch.job_name = 'jobjobjobjbojobjbojbobjobjbobjbojbojbobjobjbojbojbobjobjbojobjobjobjobjobjob'
+    with pytest.raises(AttributeError):
+        azurebatch.validate_job_name()
+
+
+def test_validate_job_name_special_characters():
+    azurebatch = parse_configuration_file('tests/valid_credentials.txt')
+    azurebatch.job_name = 'job!@#$'
+    with pytest.raises(AttributeError):
+        azurebatch.validate_job_name()
+
+
+def test_sanitize_id():
+    assert sanitize_id('good-id') == 'good-id'
+
+
+def test_sanitize_id_modify():
+    assert sanitize_id('GOOD-id') == 'good-id'
+
+
+def test_sanitize_id_underscore():
+    with pytest.raises(AttributeError):
+        assert sanitize_id('bad_id')
+
+
+def test_sanitize_id_other_special_char():
+    with pytest.raises(AttributeError):
+        assert sanitize_id('bad-id*&^')
