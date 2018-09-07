@@ -42,7 +42,7 @@ def download_container(blob_service, container_name, output_dir):
                 os.makedirs(os.path.join(output_dir, head))
                 blob_service.get_blob_to_path(container_name, blob.name, os.path.join(output_dir, head, tail))
         else:
-            blob_service.get_blob_to_path(container_name, blob.name, blob.name)
+            blob_service.get_blob_to_path(container_name, blob.name, os.path.join(output_dir, blob.name))
 
 
 def random_string(string_length):
