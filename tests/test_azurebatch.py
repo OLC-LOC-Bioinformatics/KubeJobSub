@@ -196,3 +196,17 @@ def test_sanitize_id_underscore():
 def test_sanitize_id_other_special_char():
     with pytest.raises(AttributeError):
         assert sanitize_id('bad-id*&^')
+
+
+def test_job_already_exists_returns_false():
+    azurebatch = parse_configuration_file('tests/valid_credentials.txt')
+    azurebatch.create_pool(num_nodes=1)
+    # First job create should work fine and return True
+    successful_job = azurebatch.create_job()
+    # Trying to create a job that already exists should fail and return False
+    bad_job = azurebatch.create_job()
+    assert successful_job is True and bad_job is False
+    # Clean up resources we created.
+    azurebatch.delete_job()
+    azurebatch.delete_pool()
+

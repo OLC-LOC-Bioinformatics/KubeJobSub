@@ -298,6 +298,8 @@ class AzureBatch:
     def create_job(self):
         """
         Creates a job. Must have a pool created BEFORE you attempt to run this.
+        If a job with the same name already exists, this won't work.
+        Returns False is job wasn't able to be created, True if the job create worked.
         """
         batch_client = self._login_to_batch()
         if batch_client.pool.exists(pool_id=self.job_name):
@@ -305,7 +307,11 @@ class AzureBatch:
         else:
             raise AttributeError('Job {} was added to a pool that does not exist. Pool must exist before a '
                                  'job can be added to that pool.'.format(self.job_name))
-        batch_client.job.add(job)
+        try:
+            batch_client.job.add(job)
+        except batchmodels.batch_error_py3.BatchErrorException:
+            return False
+        return True
 
     def delete_job(self):
         """
@@ -445,6 +451,14 @@ class AzureBatch:
             raise AttributeError('Job names must contain only letters, numbers and hyphens. Special characters are '
                                  'not allowed.')
         return True
+
+
+    def write_exit_code_file(self, exit_code_file):
+        if exit_code_file:  # Update exit code file with a non-zero code if upload failed.
+            with open(exit_code_file, 'a+') as f:
+                for command_id in self.command:
+                    f.write('{},{}\n'.format(self.job_name + command_id, '1'))
+        quit(code=1)
 
 
 def sanitize_id(identifier):
@@ -611,6 +625,8 @@ def check_input_output_command_match(azurebatch_object):
             raise AttributeError('Command ID {} is present, but there is no corresponding output ID.')
 
 
+
+
 if __name__ == '__main__':
     logging.basicConfig(format='\033[92m \033[1m %(asctime)s \033[0m %(message)s ',
                         level=logging.INFO,
@@ -659,11 +675,7 @@ if __name__ == '__main__':
     except:  # TODO: Double check the exception that comes up on upload timeout and make more specific.
         logging.error('ERROR: Upload of local files to cloud failed. Please try again.')
         azurebatch.delete_pool()
-        if args.exit_code_file:  # Update exit code file with a non-zero code if upload failed.
-            with open(args.exit_code_file, 'a+') as f:
-                for command_id in azurebatch.command:
-                    f.write('{},{}\n'.format(azurebatch.job_name + command_id, '1'))
-        quit(code=1)
+        azurebatch.write_exit_code_file(args.exit_code_file)
 
     # Also use cloud files already in blob storage as input, if specified.
     for input_id in azurebatch.cloud_input:
@@ -675,7 +687,12 @@ if __name__ == '__main__':
                 resource_files[input_id] = [resource]
 
     logging.info('Running tasks...')
-    azurebatch.create_job()
+    job_create_successful = azurebatch.create_job()
+    if job_create_successful is False:
+        logging.error('ERROR: Job was not created successfully. Another job with the same name may already exist.')
+        azurebatch.delete_pool()
+        azurebatch.write_exit_code_file(args.exit_code_file)
+
     for command_id in azurebatch.command:
         azurebatch.create_task(input_files=resource_files[command_id], command_id=command_id)
     # With tasks submitted, wait for all to reach a 'completed' state.
