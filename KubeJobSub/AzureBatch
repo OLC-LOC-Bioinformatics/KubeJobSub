@@ -452,8 +452,13 @@ class AzureBatch:
                                  'not allowed.')
         return True
 
-
     def write_exit_code_file(self, exit_code_file):
+        """
+        For various reasons, this script can fail to work. In addition to giving a nice error message to the user,
+        we also need to setup the exit code file to say that the task failed in case anything relies on exit codes.
+        :param exit_code_file: If None, nothing happens other than the script quitting. Otherwise, should be a string
+        that has the path to exit code file. Script will quit at the end of this method.
+        """
         if exit_code_file:  # Update exit code file with a non-zero code if upload failed.
             with open(exit_code_file, 'a+') as f:
                 for command_id in self.command:
@@ -507,6 +512,14 @@ def parse_configuration_file(config_file):
     # If user has specified any options that are not part of our set of recognized options, boot them out with a message
     for config_option in config_options:
         config_option = config_option.rstrip()
+        # Allow comments if line starts with #
+        if config_option.startswith('#'):
+            continue
+        if ':=' not in config_option:  # If line doesn't have our assignment operator in it, issue a warning to user
+            # but don't actually crash.
+            logging.warning('WARNING: Found a line in configuration file that did not have an option! Line found '
+                            'was {}'.format(config_option))
+            continue
         x = config_option.split(':=')
         option = x[0]
         parameter = x[1]
@@ -623,8 +636,6 @@ def check_input_output_command_match(azurebatch_object):
             raise AttributeError('Command ID {} is present, but there is no corresponding input ID.')
         if command_id not in azurebatch_object.output:
             raise AttributeError('Command ID {} is present, but there is no corresponding output ID.')
-
-
 
 
 if __name__ == '__main__':

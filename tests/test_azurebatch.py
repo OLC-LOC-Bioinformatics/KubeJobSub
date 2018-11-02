@@ -198,6 +198,16 @@ def test_sanitize_id_other_special_char():
         assert sanitize_id('bad-id*&^')
 
 
+def test_valid_file_with_blank_lines():
+    azurebatch = parse_configuration_file('tests/credentials_with_blank_lines.txt')
+    assert True
+
+
+def test_configuration_with_comments():
+    azurebatch = parse_configuration_file('tests/credentials_with_comments.txt')
+    assert True
+
+
 def test_job_already_exists_returns_false():
     azurebatch = parse_configuration_file('tests/valid_credentials.txt')
     azurebatch.create_pool(num_nodes=1)
