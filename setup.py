@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="KubeJobSub",
-    version="0.1.16",
+    version="0.1.17",
     packages=find_packages(),
     scripts=['KubeJobSub/KubeJobSub', 'KubeJobSub/AzureStorage', 'KubeJobSub/AzureBatch'],
     author="Andrew Low",
