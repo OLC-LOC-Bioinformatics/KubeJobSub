@@ -666,6 +666,14 @@ if __name__ == '__main__':
                         type=str,
                         required=False,
                         help='If specified, will create a file that stores the exit code for each task.')
+    parser.add_argument('--no_clean',
+                        default=False,
+                        action='store_true',
+                        help='If this flag is activated, your job and pool will not be cleaned up automatically, '
+                             'so beware, this could end up costing you lots of $$$. Only use if something else is '
+                             'watching your job to make sure that resources get cleaned up or you\'re feeling '
+                             'particularly generous towards Microsoft. This also means you will not have to wait '
+                             'for your job to finish before this script finishes.')
     args = parser.parse_args()
 
     logging.info('Reading in configuration file {}...'.format(args.configuration_file))
@@ -707,26 +715,27 @@ if __name__ == '__main__':
     for command_id in azurebatch.command:
         azurebatch.create_task(input_files=resource_files[command_id], command_id=command_id)
     # With tasks submitted, wait for all to reach a 'completed' state.
-    azurebatch.wait_for_tasks_to_complete()
-    task_exit_codes = azurebatch.check_task_exit_codes()
-    # Clean up resources so that we don't spend exorbitant amounts of money.
-    logging.info('Tasks complete! Cleaning up pool...')
-    azurebatch.delete_job()
-    azurebatch.delete_pool()
-    logging.info('Downloading output files...')
-    if args.download_output_files:
-        for output_id in azurebatch.output:
-            azurebatch.download_output_files_and_delete_container(output_dir=args.output_dir, output_id=output_id)
-    if args.keep_input_container is False:
-        for input_id in azurebatch.input:
-            azurebatch.delete_input_container(input_id=input_id)
+    if args.no_clean is False:
+        azurebatch.wait_for_tasks_to_complete()
+        task_exit_codes = azurebatch.check_task_exit_codes()
+        # Clean up resources so that we don't spend exorbitant amounts of money.
+        logging.info('Tasks complete! Cleaning up pool...')
+        azurebatch.delete_job()
+        azurebatch.delete_pool()
+        logging.info('Downloading output files...')
+        if args.download_output_files:
+            for output_id in azurebatch.output:
+                azurebatch.download_output_files_and_delete_container(output_dir=args.output_dir, output_id=output_id)
+        if args.keep_input_container is False:
+            for input_id in azurebatch.input:
+                azurebatch.delete_input_container(input_id=input_id)
 
-    # Check task exit codes. Warn user if the tasks did not have a 0 (success) exit code.
-    for task_id in task_exit_codes:
-        if args.exit_code_file:
-            with open(args.exit_code_file, 'a+') as f:
-                f.write('{},{}\n'.format(task_id, task_exit_codes[task_id]))
-        if task_exit_codes[task_id] != 0:
-            logging.error('ERROR: Task {} did not complete successfully (exit code {}). See the stderr and stdout '
-                          'files of that task for more information.'.format(task_id, task_exit_codes[task_id]))
+        # Check task exit codes. Warn user if the tasks did not have a 0 (success) exit code.
+        for task_id in task_exit_codes:
+            if args.exit_code_file:
+                with open(args.exit_code_file, 'a+') as f:
+                    f.write('{},{}\n'.format(task_id, task_exit_codes[task_id]))
+            if task_exit_codes[task_id] != 0:
+                logging.error('ERROR: Task {} did not complete successfully (exit code {}). See the stderr and stdout '
+                              'files of that task for more information.'.format(task_id, task_exit_codes[task_id]))
     logging.info('Complete!')
