@@ -29,7 +29,7 @@ pycparser==2.18
 PyJWT==1.6.4
 pytest==3.7.2
 python-dateutil==2.7.3
-PyYAML==3.13
+PyYAML==5.4
 requests==2.19.1
 requests-oauthlib==1.0.0
 SecretStorage==3.0.1
